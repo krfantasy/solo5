@@ -18,7 +18,7 @@ unikernel -- about building Solo5, and running Solo5-based unikernels.
 
 Solo5 itself has the following build dependencies:
 
-* a 64-bit Linux, FreeBSD, OpenBSD or DragonFly system (see also [Supported
+* a 64-bit Linux, FreeBSD, OpenBSD, DragonFly or macOS (Darwin) system (see also [Supported
   targets](#supported-targets) for further requirements),
 * a C11 compiler; recent versions of GCC and clang are supported,
 * GNU make,
@@ -75,6 +75,29 @@ Experimental:
   for full W^X support.
 * _hvt_: DragonFly nvmm, using `solo5-hvt` as a _tender_, on the x86\_64
   architecture.  DragonFly 6.4 or later is recommended.
+* _hvt_: macOS (Darwin) Hypervisor.framework, using `solo5-hvt` as a
+  _tender_, on the aarch64 (Apple Silicon) architecture. macOS 11.0 or later
+  is required. The tender requires `ld.lld` and `llvm-objcopy` from Homebrew
+  LLVM (`brew install llvm`); `configure.sh` auto-detects them at
+  `/opt/homebrew/opt/llvm/bin/` (or via `PATH`) and requires LLVM LLD for ELF
+  output. The `solo5-hvt` binary must be signed with the
+  `com.apple.security.hypervisor` entitlement to create VMs — `hv_vm_create`
+  fails with `HV_DENIED` (0xfae94007) without it, even as root. `make` signs
+  both `tenders/hvt/solo5-hvt` and `tenders/hvt/solo5-hvt-debug` automatically
+  with an ad-hoc signature (`codesign -s - --entitlements
+  tenders/hvt/solo5-hvt.entitlements --force --timestamp=none`) if `codesign`
+  is available (no Apple Developer account required); otherwise sign manually:
+  `codesign -s - --entitlements tenders/hvt/solo5-hvt.entitlements --force
+  tenders/hvt/solo5-hvt` (and `solo5-hvt-debug`). Verify with `codesign -d
+  --entitlements - tenders/hvt/solo5-hvt` (should contain
+  `com.apple.security.hypervisor`) and `codesign --verify --verbose`.
+  Networking on this target currently supports only the `@fd` passthrough
+  form of `--net:` (attaching an externally-created file descriptor);
+  vmnet-based networking is not implemented. The `solo5-hvt-debug` tender
+  builds but provides no gdb or dumpcore support yet (the same as
+  Linux/aarch64); `--dumpcore=` fails cleanly at startup with "not
+  implemented for this backend/architecture". Precise per-page W^X is
+  enforced for guest memory below 2MB; above that, enforcement is coarse.
 * _spt_: Linux systems on the x86\_64, ppc64le, aarch64 and riscv64
   architectures, using `solo5-spt` as a _tender_. A Linux distribution with
   libseccomp >= 2.3.3 is required, or >= 2.5.0 on riscv64.

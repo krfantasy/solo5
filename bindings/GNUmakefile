@@ -183,6 +183,29 @@ noexecstack.h: noexecstack.s
 	@echo GEN noexecstack.h
 	grep -F .note.GNU-stack $< > $@ || true
 
+ifeq ($(CONFIG_HOST), Darwin)
+#
+# ld.lld requires SHF_TLS input sections to be covered by the PT_TLS program
+# header in order to compute TP-relative offsets for local-exec TLS accesses;
+# with .tdata mapped only into its own PT_LOAD phdr it computes garbage
+# offsets ("relocation R_AARCH64_TLSLE_ADD_TPREL_HI12 out of range"). GNU ld
+# and older lld accept the shared layout, so instead of changing it we
+# generate Darwin-only linker script variants that additionally map .tdata
+# into the :tbss (PT_TLS) phdr. The toolchain wrappers reference these via
+# CONFIG_TARGET_LDS_SUFFIX (see configure.sh). Solo5's own runtime is
+# unaffected by the extra phdr coverage: the tenders ignore PT_TLS and
+# bindings/tls.c copies .tdata contents explicitly.
+#
+solo5_%_darwin.lds: solo5_%.lds
+	@echo "GEN $@"
+	sed -e 's/^    } :tdata$$/    } :tdata :tbss/' $< >$@
+
+# Filter out previously generated *_darwin.lds variants: the wildcard would
+# otherwise match its own outputs and grow an extra _darwin level on every
+# rebuild.
+all_TARGETS += $(patsubst %.lds,%_darwin.lds,$(filter-out %_darwin.lds,$(wildcard solo5_*.lds)))
+endif
+
 all: $(all_TARGETS)
 
 all_DEPS := $(patsubst %.o,%.d,$(all_OBJS))

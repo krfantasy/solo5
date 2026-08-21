@@ -42,7 +42,7 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
-#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
 
 #include <sys/types.h>
 #include <sys/event.h>
@@ -147,6 +147,8 @@ static int npollfds;
 #if defined(__linux__)
 static int timerfd = -1;
 #define INTERNAL_TIMERFD (~1U)
+#elif defined(__APPLE__)
+/* Darwin also uses kqueue, no timerfd */
 #endif
 
 static void setup_waitset(void)

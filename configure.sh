@@ -26,19 +26,19 @@ cleanup()
 
 err()
 {
-    echo "${prog_NAME}: ERROR: $@" 1>&2
+    echo "${prog_NAME}: ERROR:" "$@" 1>&2
 }
 
 die()
 {
-    echo "${prog_NAME}: ERROR: $@" 1>&2
+    echo "${prog_NAME}: ERROR:" "$@" 1>&2
     cleanup
     exit 1
 }
 
 warn()
 {
-    echo "${prog_NAME}: WARNING: $@" 1>&2
+    echo "${prog_NAME}: WARNING:" "$@" 1>&2
 }
 
 usage()
@@ -136,7 +136,11 @@ EOM
 
 ld_is_lld()
 {
-    ${LD} --version 2>&1 | grep -q '^LLD'
+    # Matches both upstream LLVM LLD banners ("LLD x.y.z (compatible with
+    # GNU linkers)") and distribution rebrands such as Homebrew's
+    # ("Homebrew LLD x.y.z (compatible with GNU linkers)"); GNU ld/gold/
+    # mold banners contain neither marker.
+    ${LD} --version 2>&1 | grep -q -e '^LLD' -e 'compatible with GNU linkers'
 }
 
 # Check that the linker ${LD} is available and suitable for our purposes.
@@ -170,7 +174,7 @@ int foo(void)
     return 1;
 }
 EOM
-    ${CC} -c conftmp.c -o conftmp.o || return 1
+    ${CC} ${TARGET_CC_CFLAGS} -c conftmp.c -o conftmp.o || return 1
 
     printf "%s: Checking if ${LD} understands ${TARGET_ARCH}: " "${prog_NAME}"
     if ! ${LD} -r -o conftmp1.o conftmp.o >/dev/null 2>&1; then
@@ -203,7 +207,7 @@ int local(void)
     return 1;
 }
 EOM
-    ${CC} -c conftmp.c -o conftmp.o || return 1
+    ${CC} ${TARGET_CC_CFLAGS} -c conftmp.c -o conftmp.o || return 1
 
     # [Clang] A LLVM objcopy will understand any LLVM-supported architecture.
     # [GCC] A GNU objcopy will only understand the architecture it was
@@ -324,6 +328,10 @@ case ${HOST_CC_MACHINE} in
             echo "#undef HAVE_VMM_H" >tenders/hvt/hvt_openbsd_config.h
         fi
         ;;
+    arm64-*darwin*|aarch64-*darwin*)
+        CONFIG_HOST_ARCH=aarch64 CONFIG_HOST=Darwin
+        CONFIG_HVT_TENDER=1
+        ;;
     *)
         die "Unsupported host toolchain: ${HOST_CC_MACHINE}"
         ;;
@@ -333,7 +341,6 @@ HOST_PKG_CONFIG=${HOST_PKG_CONFIG:-pkg-config}
 
 CONFIG_SPT_TENDER_NO_PIE=
 CONFIG_SPT_TENDER_LIBSECCOMP_CFLAGS=
-CONFIG_SPT_TENDER_LIBSECCOMP_LDFLAGS=
 if [ -n "${CONFIG_SPT_TENDER}" ]; then
     # If the host toolchain is NOT configured to build PIE exectuables by
     # default, assume it has no support for that and apply a workaround by
@@ -440,10 +447,16 @@ case ${TARGET_CC_MACHINE} in
             CONFIG_HVT=1 CONFIG_SPT=1 CONFIG_VIRTIO=1 CONFIG_MUEN=1 CONFIG_XEN=1
         fi
         ;;
-    aarch64-*)
+    aarch64-*|arm64-*)
         TARGET_ARCH=aarch64
         TARGET_LD_MAX_PAGE_SIZE=0x1000
-        CONFIG_HVT=1 CONFIG_SPT=1
+        if [ "${CONFIG_HOST}" = "Darwin" ]; then
+            # Darwin host only supports hvt on aarch64; spt/virtio/muen/xen are
+            # Linux/BSD-specific or not applicable
+            CONFIG_HVT=1
+        else
+            CONFIG_HVT=1 CONFIG_SPT=1
+        fi
         ;;
     powerpc64le-*|ppc64le-*)
         TARGET_ARCH=ppc64le
@@ -462,6 +475,11 @@ esac
 
 TARGET_CC_CFLAGS=
 TARGET_CC_IS_OPENBSD=
+# Suffix appended to the Solo5 linker script names used by the target
+# toolchain wrappers (toolchain/cc.in, toolchain/ld.in). Non-empty only on
+# hosts whose linker needs a generated variant of the scripts in bindings/
+# (see bindings/GNUmakefile); empty means "use the shared scripts as-is".
+TARGET_LDS_SUFFIX=
 if CC="${TARGET_CC}" cc_is_clang; then
     TARGET_CC_CFLAGS=-nostdlibinc
     # XXX Clang warns for no good reason if -nostdlibinc is used and no
@@ -489,6 +507,22 @@ case ${TARGET_CC_MACHINE} in
         # [Clang] OpenBSD's LLVM/Clang uses a global stack protector guard, but
         # different symbols; see bindings/GNUmakefile.
         TARGET_CC_IS_OPENBSD=1
+        ;;
+    *darwin*)
+        # On Darwin the default target is arm64-apple-darwin which produces
+        # Mach-O. For Solo5 we need ELF output for the aarch64 target, so
+        # pass an explicit --target and ensure the stack protector uses the
+        # global guard (Darwin clang defaults to TLS for -fstack-protector).
+        # Also disable emulated TLS as Solo5 provides its own TLS via tpidr_el0.
+        TARGET_CC_CFLAGS="${TARGET_CC_CFLAGS} --target=aarch64-unknown-none-elf -mstack-protector-guard=global -fno-emulated-tls"
+        CC="${TARGET_CC}" cc_check_option --target=aarch64-unknown-none-elf -mstack-protector-guard=global -fno-emulated-tls || \
+            die "${TARGET_CC} does not support --target=aarch64-unknown-none-elf with -mstack-protector-guard=global -fno-emulated-tls"
+        # ld.lld requires the initialized TLS section (.tdata) to be covered
+        # by the PT_TLS program header to compute TP-relative offsets for
+        # local-exec TLS accesses. The shared linker scripts map .tdata into
+        # its own PT_LOAD phdr (which GNU ld accepts), so use the generated
+        # *_darwin.lds variants produced by bindings/GNUmakefile.
+        TARGET_LDS_SUFFIX=_darwin
         ;;
 esac
 
@@ -541,6 +575,38 @@ case ${CONFIG_HOST} in
                 err "gcc version ${major_version} of ${TARGET_CC} unsupported on DragonFly"
                 die "gcc 9+ or clang required on DragonFly"
             fi
+        fi
+        ;;
+    Darwin)
+        # Darwin: Use LLD and llvm-objcopy from Homebrew LLVM if available,
+        # otherwise fall back to system tools. The target linker must produce
+        # ELF, so we require LLD.
+        if [ -z "${TARGET_LD}" ]; then
+            if command -v ld.lld >/dev/null 2>&1; then
+                TARGET_LD="ld.lld"
+            elif [ -x "/opt/homebrew/opt/llvm/bin/ld.lld" ]; then
+                TARGET_LD="/opt/homebrew/opt/llvm/bin/ld.lld"
+            elif [ -x "/opt/homebrew/bin/ld.lld" ]; then
+                TARGET_LD="/opt/homebrew/bin/ld.lld"
+            else
+                TARGET_LD="ld.lld"
+            fi
+        fi
+        if [ -z "${TARGET_OBJCOPY}" ]; then
+            if command -v llvm-objcopy >/dev/null 2>&1; then
+                TARGET_OBJCOPY="llvm-objcopy"
+            elif [ -x "/opt/homebrew/opt/llvm/bin/llvm-objcopy" ]; then
+                TARGET_OBJCOPY="/opt/homebrew/opt/llvm/bin/llvm-objcopy"
+            else
+                TARGET_OBJCOPY="llvm-objcopy"
+            fi
+        fi
+        # Darwin's linker insists on producing Mach-O unless we use LLD with ELF.
+        # Ensure we use LLD and suppress build-id.
+        TARGET_CC_LDFLAGS="-Wl,--build-id=none -no-pie"
+        if ! LD="${TARGET_LD}" ld_is_lld; then
+            err "${TARGET_LD} is not LLVM LLD"
+            die "LLVM LLD is required on Darwin for ELF target"
         fi
         ;;
     *)
@@ -615,6 +681,7 @@ CONFIG_TARGET_LD=${TARGET_LD}
 CONFIG_TARGET_LD_LDFLAGS=${TARGET_LD_LDFLAGS}
 CONFIG_TARGET_LD_MAX_PAGE_SIZE=${TARGET_LD_MAX_PAGE_SIZE}
 CONFIG_TARGET_OBJCOPY=${TARGET_OBJCOPY}
+CONFIG_TARGET_LDS_SUFFIX=${TARGET_LDS_SUFFIX}
 EOM
 
 #

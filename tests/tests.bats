@@ -52,7 +52,7 @@ setup() {
     Linux)
       [ -c /dev/kvm -a -w /dev/kvm ] || skip "no access to /dev/kvm or not present"
       ;;
-    FreeBSD|OpenBSD)
+    FreeBSD|OpenBSD|Darwin)
       # TODO, just try and run the test anyway
       ;;
     *)
@@ -361,10 +361,14 @@ xen_expect_abort() {
 }
 
 @test "xnow hvt" {
-  skip_unless_host_is Linux OpenBSD
+  skip_unless_host_is Linux OpenBSD Darwin
 
   hvt_run test_xnow/test_xnow.hvt
-  [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
+  if [ "$status" -eq 1 ]; then
+    [[ "$output" == *"host/guest translation fault"* ]]
+  else
+    [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+  fi
 }
 
 @test "xnow spt" {
@@ -391,10 +395,15 @@ xen_expect_abort() {
 }
 
 @test "wnox hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
 
   hvt_run test_wnox/test_wnox.hvt
-  [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
+  # Darwin ARM64 enforces via guest stage-1 (PTE) -> Solo5 Fatal trap (255), OpenBSD via EPT -> hv translation fault (1)
+  if [ "$status" -eq 1 ]; then
+    [[ "$output" == *"host/guest translation fault"* ]]
+  else
+    [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+  fi
 }
 
 @test "wnox spt" {

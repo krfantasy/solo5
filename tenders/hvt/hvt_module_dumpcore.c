@@ -24,7 +24,11 @@
 
 #define _GNU_SOURCE
 #include <err.h>
+#ifdef __APPLE__
+#include "../common/elf_darwin.h"
+#else
 #include <elf.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -70,6 +74,12 @@ typedef unsigned char *host_mvec_t;
 typedef unsigned char *host_mvec_t;
 
 #elif defined(__linux__) && defined(__aarch64__)
+
+#include "hvt_dumpcore_kvm_aarch64.c"
+#define EM_HOST EM_AARCH64
+typedef unsigned char *host_mvec_t;
+
+#elif defined(__APPLE__) && defined(__aarch64__)
 
 #include "hvt_dumpcore_kvm_aarch64.c"
 #define EM_HOST EM_AARCH64
@@ -200,7 +210,12 @@ void hvt_dumpcore_hook(struct hvt *hvt, int status, void *cookie)
     size_t ndumped = 0;
     host_mvec_t mvec = malloc(npages);
     assert(mvec);
+#if defined(__APPLE__)
+    /* Darwin's mincore(2) takes char *vec */
+    if (mincore(hvt->mem, hvt->guest_mem_size, (char *)mvec) == -1) {
+#else
     if (mincore(hvt->mem, hvt->guest_mem_size, mvec) == -1) {
+#endif
         warn("dumpcore: mincore() failed");
         goto failure;
     }

@@ -39,7 +39,7 @@ PHDRS {
                               FLAGS values come from PF_x in elf.h */
     rodata PT_LOAD FLAGS(4);
 
-    data PT_LOAD;
+    data PT_LOAD FLAGS(6);
     tdata PT_LOAD FLAGS(4); /* RO: this have to be copied into each thread */
     tbss PT_TLS FLAGS(0); /* no perm needed */
     bss PT_LOAD;

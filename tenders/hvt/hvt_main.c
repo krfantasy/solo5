@@ -39,8 +39,13 @@
 #include "hvt.h"
 #include "version.h"
 
+#if defined(__APPLE__)
+extern struct hvt_module __start_modules __asm("section$start$__DATA$__modules");
+extern struct hvt_module __stop_modules __asm("section$end$__DATA$__modules");
+#else
 extern struct hvt_module __start_modules;
 extern struct hvt_module __stop_modules;
+#endif
 
 static void setup_modules(struct hvt *hvt, struct mft *mft)
 {

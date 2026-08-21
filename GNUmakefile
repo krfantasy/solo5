@@ -148,9 +148,18 @@ install-toolchain: build
 	    "{}" "$(TOOLCHAIN_INCDIR)/{}" \;
 	$(INSTALL) -m 0644 bindings/solo5_stub.o $(TOOLCHAIN_LIBDIR)
 	$(INSTALL) -m 0644 bindings/solo5_stub.lds $(TOOLCHAIN_LIBDIR)
+ifneq ($(CONFIG_TARGET_LDS_SUFFIX),)
+	# Hosts whose wrappers reference generated linker script variants
+	# (see configure.sh, CONFIG_TARGET_LDS_SUFFIX) need those variants
+	# installed too.
+	$(INSTALL) -m 0644 bindings/solo5_stub$(CONFIG_TARGET_LDS_SUFFIX).lds $(TOOLCHAIN_LIBDIR)
+endif
 ifdef CONFIG_HVT
 	$(INSTALL) -m 0644 bindings/solo5_hvt.o $(TOOLCHAIN_LIBDIR)
 	$(INSTALL) -m 0644 bindings/solo5_hvt.lds $(TOOLCHAIN_LIBDIR)
+ifneq ($(CONFIG_TARGET_LDS_SUFFIX),)
+	$(INSTALL) -m 0644 bindings/solo5_hvt$(CONFIG_TARGET_LDS_SUFFIX).lds $(TOOLCHAIN_LIBDIR)
+endif
 endif
 ifdef CONFIG_SPT
 	$(INSTALL) -m 0644 bindings/solo5_spt.o $(TOOLCHAIN_LIBDIR)
@@ -183,6 +192,13 @@ ifdef CONFIG_HVT_TENDER
 	$(INSTALL) tenders/hvt/solo5-hvt $(D)/bin
 	- [ -f tenders/hvt/solo5-hvt-debug ] && \
 	    $(INSTALL) tenders/hvt/solo5-hvt-debug $(D)/bin
+	@if [ "$(CONFIG_HOST)" = "Darwin" ]; then \
+	    if command -v codesign >/dev/null 2>&1; then \
+	        for f in $(D)/bin/solo5-hvt $(D)/bin/solo5-hvt-debug; do \
+	            [ -f "$$f" ] && codesign -s - --entitlements $(TOPDIR)/tenders/hvt/solo5-hvt.entitlements --force --timestamp=none "$$f" || echo "Warning: codesign failed for $$f"; \
+	        done; \
+	    fi; \
+	fi
 endif
 ifdef CONFIG_SPT_TENDER
 	$(INSTALL) tenders/spt/solo5-spt $(D)/bin

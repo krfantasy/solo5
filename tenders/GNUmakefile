@@ -92,6 +92,11 @@ else ifeq ($(CONFIG_HOST), DragonFly)
     hvt_SRCS += hvt/hvt_dragonfly.c hvt/hvt_dragonfly_$(CONFIG_HOST_ARCH).c
     all_TARGETS += hvt/solo5-hvt
     HOSTLDLIBS += -lpthread -lnvmm
+else ifeq ($(CONFIG_HOST), Darwin)
+    hvt_SRCS += hvt/hvt_hvf.c hvt/hvt_hvf_$(CONFIG_HOST_ARCH).c
+    hvt_debug_MODULES ?= dumpcore
+    all_TARGETS += hvt/solo5-hvt hvt/solo5-hvt-debug
+    HOSTLDLIBS += -lpthread -framework Hypervisor
 endif
 
 # NOTE(dinosaure): here, we construct solo5-hvt with *.o objects and
@@ -109,9 +114,25 @@ hvt/solo5-hvt-debug: HOSTCFLAGS += -DHVT_DROP_PRIVILEGES=0
 
 hvt/solo5-hvt: $(hvt_OBJS) $(common_LIB)
 	$(HOSTLINK)
+	@if [ "$(CONFIG_HOST)" = "Darwin" ]; then \
+	    if command -v codesign >/dev/null 2>&1; then \
+	        echo "CODESIGN $@"; \
+	        codesign -s - --entitlements $(TOPDIR)/tenders/hvt/solo5-hvt.entitlements --force --timestamp=none $@ || echo "Warning: codesign failed for $@ (run: codesign -s - --entitlements tenders/hvt/solo5-hvt.entitlements --force $@)"; \
+	    else \
+	        echo "Warning: codesign not found — $@ will not run until signed (see docs/building.md)"; \
+	    fi; \
+	fi
 
 hvt/solo5-hvt-debug: $(hvt_debug_OBJS) $(common_LIB)
 	$(HOSTLINK)
+	@if [ "$(CONFIG_HOST)" = "Darwin" ]; then \
+	    if command -v codesign >/dev/null 2>&1; then \
+	        echo "CODESIGN $@"; \
+	        codesign -s - --entitlements $(TOPDIR)/tenders/hvt/solo5-hvt.entitlements --force --timestamp=none $@ || echo "Warning: codesign failed for $@ (run: codesign -s - --entitlements tenders/hvt/solo5-hvt.entitlements --force $@)"; \
+	    else \
+	        echo "Warning: codesign not found — $@ will not run until signed (see docs/building.md)"; \
+	    fi; \
+	fi
 
 endif # CONFIG_HVT_TENDER
 

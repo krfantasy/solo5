@@ -28,7 +28,11 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <err.h>
+#ifdef __APPLE__
+#include "elf_darwin.h"
+#else
 #include <elf.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -280,8 +284,18 @@ void elf_load(int bin_fd, const char *bin_name, uint8_t *mem, size_t mem_size,
         /*
          * consider only non empty PT_LOAD
          */
-        if (phdr[ph_i].p_filesz == 0 || phdr[ph_i].p_type != PT_LOAD)
+        if (phdr[ph_i].p_type != PT_LOAD)
             continue;
+        if (phdr[ph_i].p_filesz == 0 && phdr[ph_i].p_memsz == 0)
+            continue;
+        /*
+         * A PT_LOAD with p_filesz == 0 but p_memsz > 0 is a pure BSS
+         * segment: there is nothing to load from the file, but it still
+         * occupies guest memory and MUST participate in memory protection
+         * setup (it is writable), otherwise hosts that apply segment
+         * permissions (e.g. Darwin/HVF stage-2 W^X) compute wrong unions
+         * for host pages shared with neighbouring segments.
+         */
 
         if (p_vaddr < p_min_loadaddr) {
             warnx("%s: %s: phdr[%u].p_vaddr outside of valid memory range"
@@ -419,9 +433,11 @@ void elf_load(int bin_fd, const char *bin_name, uint8_t *mem, size_t mem_size,
                   bin_name, INV_EXE, ph_i);
             goto mem_cleanup;
         }
+
         nbytes =
             pread_in_full(bin_fd, host_vaddr, p_filesz, phdr[ph_i].p_offset);
         if (nbytes < 0) {
+            warn("%s: phdr[%u] pread failed", bin_name, ph_i);
             warnx("%s: phdr[%u] pread_in_full returned %zu", bin_name, ph_i,
                   nbytes);
             goto mem_cleanup;

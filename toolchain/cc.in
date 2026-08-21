@@ -86,7 +86,7 @@ case ${M} in
             "$@"
         ;;
     link)
-        [ -n "${B}" ] && B="-Wl,-T,solo5_${B}.lds -l :solo5_${B}.o"
+        [ -n "${B}" ] && B="-Wl,-T,solo5_${B}@@CONFIG_TARGET_LDS_SUFFIX@@.lds -l :solo5_${B}.o"
         [ -n "${__V}" ] && set -x
         exec @@CONFIG_TARGET_CC@@ \
             @@CONFIG_TARGET_CC_CFLAGS@@ \

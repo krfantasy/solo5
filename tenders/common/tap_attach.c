@@ -55,6 +55,11 @@
 #include <sys/socket.h>
 #include <net/if.h>
 
+#elif defined(__APPLE__)
+
+#include <sys/socket.h>
+#include <net/if.h>
+
 #else /* !__linux__ && !__FreeBSD__ && !__OpenBSD__ */
 
 #error Unsupported target
@@ -71,7 +76,12 @@ int tap_attach(const char *ifname, int *mtu)
      */
     if (ifname[0] == '@') {
         char *endp;
-        long int maybe_fd = strtol(&ifname[1], &endp, 10);
+        long int maybe_fd;
+
+        /* Must be cleared before strtol(): the check below relies on errno,
+         * which may hold an unrelated error from previous library calls. */
+        errno = 0;
+        maybe_fd = strtol(&ifname[1], &endp, 10);
         if (*endp != 0 /* Invalid character at (*endp)? */
             || endp == &ifname[1] /* Empty string? */)
             errno = EINVAL;
@@ -84,6 +94,11 @@ int tap_attach(const char *ifname, int *mtu)
         if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1)
             return -1;
 
+        /* There is no interface to query for the MTU; use the Solo5 default
+         * (1500), matching what a tap device would typically report. Without
+         * this the caller sees *mtu == -1 and rejects the (valid) fd.
+         */
+        *mtu = 1500;
         return fd;
     } else if (strlen(ifname) >= IFNAMSIZ) {
         errno = ENAMETOOLONG;
@@ -190,6 +205,16 @@ int tap_attach(const char *ifname, int *mtu)
     fd = open(devname, O_RDWR | O_NONBLOCK);
     if (fd == -1)
         return -1;
+#elif defined(__APPLE__)
+    /*
+     * macOS has no native tap device like /dev/tap*, and vmnet-based
+     * networking is not implemented. Only the generic fd-passing syntax
+     * (@fd, handled above) works on this host; named interfaces fail with
+     * ENOSYS. The caller (hvt_module_net) will report a meaningful error.
+     */
+    (void)up;
+    errno = ENOSYS;
+    return -1;
 #endif
 
     /*

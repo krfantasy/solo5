@@ -54,6 +54,8 @@
 #include "hvt_openbsd.h"
 #elif defined(__DragonFly__)
 #include "hvt_dragonfly.h"
+#elif defined(__APPLE__)
+#include "hvt_hvf.h"
 #endif
 
 static bool module_in_use;
@@ -66,6 +68,12 @@ static hvt_gpa_t reserved_ring_gpa;
 
 size_t hvt_net_mem_overhead(struct mft *mft)
 {
+#if defined(__APPLE__)
+    /* Ring I/O is not supported on Darwin (no ring is ever reserved or
+     * wired up), so no guest memory needs to be set aside for it. */
+    (void)mft;
+    return 0;
+#else
     for (unsigned i = 0; i != mft->entries; i++) {
         if (mft->e[i].type == MFT_DEV_NET_BASIC && mft->e[i].attached) {
             size_t overhead = sizeof(struct hvt_ring);
@@ -74,6 +82,7 @@ size_t hvt_net_mem_overhead(struct mft *mft)
         }
     }
     return 0;
+#endif
 }
 
 void hvt_net_reserve_ring(struct hvt *hvt, struct mft *mft)
@@ -278,6 +287,7 @@ static inline void process_ring_commits(struct hvt *hvt, struct hvt_ring *ring)
     }
 }
 
+static void *io_thread_net_fn(void *arg) __attribute__((unused));
 static void *io_thread_net_fn(void *arg)
 {
     struct io_thread_arg *ta = arg;
@@ -353,6 +363,7 @@ static void *io_thread_net_fn(void *arg)
     return NULL;
 }
 
+static void kill_net_pthread(struct hvt *hvt, int status, void *cookie) __attribute__((unused));
 static void kill_net_pthread(struct hvt *hvt, int status, void *cookie)
 {
     (void)status;
@@ -379,6 +390,9 @@ static void kill_net_pthread(struct hvt *hvt, int status, void *cookie)
         hvb->kick_net_pipe[0] = -1;
         hvb->kick_net_pipe[1] = -1;
     }
+#elif defined(__APPLE__)
+    /* No ring thread on Darwin yet */
+    (void)hvb;
 #endif
 }
 
@@ -412,7 +426,17 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
         int mtu = -1;
         int fd = tap_attach(iface, &mtu);
         if (fd < 0 || mtu < 0) {
-            warnx("Could not attach interface: %s: %s", iface, strerror(errno));
+            int attach_errno = errno;
+            warnx("Could not attach interface: %s: %s", iface,
+                  strerror(attach_errno));
+#if defined(__APPLE__)
+            /* No native tap devices on Darwin: any named-interface attach
+             * fails (ENOENT from the interface scan, or ENOSYS here), so
+             * point the user at the only supported form. */
+            if (iface[0] != '@')
+                warnx("Only --net:%s=@fd (pass an externally-created file"
+                      " descriptor) is supported on Darwin", name);
+#endif
             return -1;
         }
 
@@ -470,6 +494,12 @@ static int setup(struct hvt *hvt, struct mft *mft)
         struct hvt_b *hvb = hvt->b;
         struct hvt_ring *ring =
             (struct hvt_ring *)(hvt->mem + reserved_ring_gpa);
+        /* Darwin HVF does not yet support ring I/O, fall back to hypercalls */
+#if defined(__APPLE__)
+        (void)hvb;
+        (void)ring;
+        goto skip_ring;
+#else
         hvb->net_ring_gpa = reserved_ring_gpa;
         int notify_fd = -1;
 
@@ -550,6 +580,7 @@ static int setup(struct hvt *hvt, struct mft *mft)
             ;
 
         assert(hvt_core_register_halt_hook(kill_net_pthread) == 0);
+#endif
     skip_ring:;
     }
 
