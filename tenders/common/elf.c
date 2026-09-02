@@ -433,11 +433,9 @@ void elf_load(int bin_fd, const char *bin_name, uint8_t *mem, size_t mem_size,
                   bin_name, INV_EXE, ph_i);
             goto mem_cleanup;
         }
-
         nbytes =
             pread_in_full(bin_fd, host_vaddr, p_filesz, phdr[ph_i].p_offset);
         if (nbytes < 0) {
-            warn("%s: phdr[%u] pread failed", bin_name, ph_i);
             warnx("%s: phdr[%u] pread_in_full returned %zu", bin_name, ph_i,
                   nbytes);
             goto mem_cleanup;
