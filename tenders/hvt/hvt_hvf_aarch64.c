@@ -84,9 +84,7 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
     /* Enable FP/SIMD via CPACR */
     uint64_t cpacr;
     ret = hv_vcpu_get_sys_reg(hvb->vcpu, HV_SYS_REG_CPACR_EL1, &cpacr);
-    /* If get fails, start from 0 */
-    if (ret != HV_SUCCESS)
-        cpacr = 0;
+    hv_check(ret, "hv_vcpu_get_sys_reg(CPACR_EL1)");
     cpacr &= ~((uint64_t)0x3 << 20);
     cpacr |= ((uint64_t)0x3 << 20);
     ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_CPACR_EL1, cpacr);
