@@ -201,7 +201,8 @@ int hvt_vcpu_loop(struct hvt *hvt)
         ncanceled = 0;
         if (exit->reason == HV_EXIT_REASON_VTIMER_ACTIVATED) {
             /* VTimer not used by Solo5, just clear mask and continue */
-            hv_vcpu_set_vtimer_mask(hvb->vcpu, false);
+            hv_check(hv_vcpu_set_vtimer_mask(hvb->vcpu, false),
+                     "hv_vcpu_set_vtimer_mask");
             continue;
         } else if (exit->reason != HV_EXIT_REASON_EXCEPTION) {
             uint64_t pc;
