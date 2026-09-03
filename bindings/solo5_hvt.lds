@@ -69,6 +69,23 @@ SECTIONS {
         *(.text.*)
     } :text
 
+    /*
+     * The guest exception vectors (cpu_exception_vectors, referenced by
+     * VBAR_EL1) live in this input section. They MUST be placed inside the
+     * executable :text segment: leaving it to orphan-section placement makes
+     * its location depend on the size of .text, and when it lands in a
+     * read-only segment (e.g. directly after .rodata) the tender's stage-1
+     * W^X enforcement revokes execute permission on the vector page. The
+     * guest's own exception delivery then faults on the vector fetch and
+     * livelocks the vCPU instead of reaching the trap handler. Being an
+     * output section of its own here (before the _etext page alignment)
+     * also guarantees the vectors never share a 4K page with .rodata.
+     */
+    .exception.text :
+    {
+        *(.exception.text)
+    } :text
+
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     _etext = .;
 

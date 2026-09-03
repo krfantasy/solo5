@@ -388,10 +388,15 @@ xen_expect_abort() {
 }
 
 @test "rnox hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
 
   hvt_run test_rnox/test_rnox.hvt
-  [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
+  # Darwin ARM64 enforces via guest stage-1 (PTE) -> Solo5 Fatal trap (255), OpenBSD via EPT -> hv translation fault (1)
+  if [ "$status" -eq 1 ]; then
+    [[ "$output" == *"host/guest translation fault"* ]]
+  else
+    [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+  fi
 }
 
 @test "wnox hvt" {
@@ -404,6 +409,50 @@ xen_expect_abort() {
   else
     [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
   fi
+}
+
+@test "heapnx hvt" {
+  skip_unless_host_is Darwin
+
+  hvt_run test_heapnx/test_heapnx.hvt
+  # First heap page is below 2MB with a wired RW/NX stage-1 PTE; ARM checks
+  # stage-1 before stage-2, so enforcement must surface as a guest Fatal
+  # trap (255), proving 4K precision rather than the 16K stage-2 union.
+  [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+}
+
+@test "heapnx stack hvt" {
+  skip_unless_host_is Darwin
+
+  hvt_run test_heapnx/test_heapnx.hvt stack
+  # Stack lives above the wired image blocks; either layer may win.
+  if [ "$status" -eq 1 ]; then
+    [[ "$output" == *"host/guest translation fault"* ]]
+  else
+    [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+  fi
+}
+
+@test "wx_big run hvt" {
+  skip_unless_host_is Linux OpenBSD Darwin
+
+  hvt_run test_wx_big/test_wx_big.hvt
+  expect_success
+}
+
+@test "wx_big xnow hvt" {
+  skip_unless_host_is Darwin
+
+  hvt_run test_wx_big/test_wx_big.hvt xnow
+  [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
+}
+
+@test "wx_big wnox hvt" {
+  skip_unless_host_is Darwin
+
+  hvt_run test_wx_big/test_wx_big.hvt wnox
+  [[ "$output" == *"0x0000000000001000"* ]]
+  [ "$status" -eq 255 ] && [[ "$output" == *"Fatal trap"* ]]
 }
 
 @test "wnox spt" {

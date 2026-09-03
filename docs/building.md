@@ -96,8 +96,16 @@ Experimental:
   vmnet-based networking is not implemented. The `solo5-hvt-debug` tender
   builds but provides no gdb or dumpcore support yet (the same as
   Linux/aarch64); `--dumpcore=` fails cleanly at startup with "not
-  implemented for this backend/architecture". Precise per-page W^X is
-  enforced for guest memory below 2MB; above that, enforcement is coarse.
+  implemented for this backend/architecture". W^X is enforced precisely for
+  the whole of guest memory: ELF-loaded segments at 4K granularity via the
+  guest stage-1 page tables (including above the first 2MB), and all other
+  memory (heap, stack, reserved areas) is mapped read-write but
+  non-executable at stage 2; within the ELF image's 2MB blocks (e.g.
+  the heap directly following the image) this is additionally enforced
+  at 4K granularity in stage 1. Stage-2 permissions are
+  applied at 16K (host page) granularity with a union of the segment
+  permissions on each host page; the guest stage-1 tables refine this to
+  4K. ELF images larger than 450MB are refused at startup: precise W^X capacity is 224 tables (450MB), and the tender aborts rather than running a coarse RWX tail.
 * _spt_: Linux systems on the x86\_64, ppc64le, aarch64 and riscv64
   architectures, using `solo5-spt` as a _tender_. A Linux distribution with
   libseccomp >= 2.3.3 is required, or >= 2.5.0 on riscv64.

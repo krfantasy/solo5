@@ -24,6 +24,7 @@
  */
 
 #include <assert.h>
+#include <err.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -118,4 +119,15 @@ void hvt_boot_info_init(struct hvt *hvt, hvt_gpa_t gpa_kend, int cmdline_argc,
             assert(bi->mem_size == hvb->net_ring_gpa);
         }
     }
+
+#if defined(__APPLE__) && defined(__aarch64__)
+    /*
+     * The HVF backend reserves guest low memory [0x20000, 0x100000) for
+     * additional guest stage-1 page-table pages; boot info must stay below
+     * it. See hvt_hvf_wire_block_ptes() in hvt_hvf.c.
+     */
+    if (lowmem_pos > 0x20000)
+        errx(1, "hvt boot info end 0x%x exceeds reserved low memory (HVF stage-1 tables start at 0x20000)",
+             (unsigned)lowmem_pos);
+#endif
 }

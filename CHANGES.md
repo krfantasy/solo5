@@ -1,3 +1,19 @@
+## Unreleased
+
+- hvt: Darwin HVF backend: enforce W^X precisely for all guest memory —
+  heap/stack/unmapped-region memory is now RW non-executable (previously
+  RWX), and 4K-precise permissions now extend to ELF images above the first
+  2MB via additional guest stage-1 page tables
+- bindings: hvt linker script places the guest exception vectors
+  (.exception.text) in the executable segment; they were an orphan section
+  that could land in the read-only rodata segment, so a guest exception
+  could never be delivered under a W^X-enforcing tender (the vector fetch
+  re-faulted on the same non-executable page; found via the Darwin HVF
+  backend where it wedged the vCPU in an exception storm)
+- tests: enable the hvt `wnox` and `rnox` W^X probes on Darwin; add
+  `test_heapnx` (heap/stack execution) and `test_wx_big` (probes with an
+  ELF image above 2MB)
+
 ## v0.13.0 (2026-08-28)
 
 - Fix the compilation on Alpine and pass `-no-pie` option outside the `-Wl`

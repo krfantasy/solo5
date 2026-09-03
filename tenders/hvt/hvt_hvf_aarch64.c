@@ -70,9 +70,10 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
     aarch64_setup_memory_mapping(hvt->mem, hvt->mem_alloc_size);
 
     /* Apply deferred W^X protections recorded during elf_load().
-     * Host and stage-2 are 16K-granular (union per host page), guest
-     * stage-1 is 4K via PTE patching — precise 4K W^X applies only to
-     * the first 2MB; above 2MB enforcement is coarse (16K unions). */
+     * Host and stage-2 are 16K-granular (union per host page); guest
+     * stage-1 is 4K via PTE patching below 2MB and via block PTE wiring
+     * for the ELF image above 2MB — 4K-precise W^X across the whole
+     * image. */
     extern void hvt_hvf_apply_deferred_protections(struct hvt *hvt);
     hvt_hvf_apply_deferred_protections(hvt);
 
@@ -238,9 +239,6 @@ int hvt_vcpu_loop(struct hvt *hvt)
             uint64_t srt = (syndrome >> 16) & 0x1F;
             uint64_t sas = (syndrome >> 22) & 0x3;
 
-            /* Solo5 hypercalls and ring kicks are 32-bit stores; the stored
-             * value is read from register srt (xzr reads as zero). This
-             * matches the KVM backend's strict 32-bit MMIO length check. */
             /* Solo5 hypercalls and ring kicks are 32-bit stores; the stored
              * value is read from register srt (xzr reads as zero). This
              * matches the KVM backend's strict 32-bit MMIO length check. */
