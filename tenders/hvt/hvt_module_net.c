@@ -363,7 +363,8 @@ static void *io_thread_net_fn(void *arg)
     return NULL;
 }
 
-static void kill_net_pthread(struct hvt *hvt, int status, void *cookie) __attribute__((unused));
+static void kill_net_pthread(struct hvt *hvt, int status, void *cookie)
+    __attribute__((unused));
 static void kill_net_pthread(struct hvt *hvt, int status, void *cookie)
 {
     (void)status;
@@ -435,7 +436,8 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
              * point the user at the only supported form. */
             if (iface[0] != '@')
                 warnx("Only --net:%s=@fd (pass an externally-created file"
-                      " descriptor) is supported on Darwin", name);
+                      " descriptor) is supported on Darwin",
+                      name);
 #endif
             return -1;
         }

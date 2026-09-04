@@ -127,7 +127,9 @@ void hvt_boot_info_init(struct hvt *hvt, hvt_gpa_t gpa_kend, int cmdline_argc,
      * it. See hvt_hvf_wire_block_ptes() in hvt_hvf.c.
      */
     if (lowmem_pos > 0x20000)
-        errx(1, "hvt boot info end 0x%x exceeds reserved low memory (HVF stage-1 tables start at 0x20000)",
+        errx(1,
+             "hvt boot info end 0x%x exceeds reserved low memory (HVF stage-1 "
+             "tables start at 0x20000)",
              (unsigned)lowmem_pos);
 #endif
 }

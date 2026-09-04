@@ -60,7 +60,8 @@ struct hvt *hvt_init(size_t mem_size)
             errx(1,
                  "hv_vm_create failed: 0x%x (HV_DENIED) — binary lacks "
                  "com.apple.security.hypervisor entitlement. Fix: "
-                 "codesign -s - --entitlements tenders/hvt/solo5-hvt.entitlements "
+                 "codesign -s - --entitlements "
+                 "tenders/hvt/solo5-hvt.entitlements "
                  "--force %s (see docs/building.md)",
                  ret, "tenders/hvt/solo5-hvt");
         errx(1, "hv_vm_create failed: 0x%x", ret);
@@ -74,7 +75,8 @@ struct hvt *hvt_init(size_t mem_size)
     hvt->guest_mem_size = mem_size;
     hvt->mem_alloc_size = mem_size;
 
-    ret = hv_vm_map(hvt->mem, 0, mem_size, HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC);
+    ret = hv_vm_map(hvt->mem, 0, mem_size,
+                    HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC);
     if (ret != HV_SUCCESS)
         errx(1, "hv_vm_map failed: 0x%x", ret);
 
@@ -175,12 +177,12 @@ static int hvf_pa_prot(uint64_t pa)
 static uint64_t hvf_prot_to_pte(int prot)
 {
     if (prot & PROT_WRITE)
-        return PROT_PAGE_NORMAL;             /* RW, non-exec */
+        return PROT_PAGE_NORMAL; /* RW, non-exec */
     if (prot & PROT_EXEC)
-        return PROT_PAGE_NORMAL_EXEC_RO;     /* RX (EL1-executable, RO) */
+        return PROT_PAGE_NORMAL_EXEC_RO; /* RX (EL1-executable, RO) */
     if (prot & PROT_READ)
-        return PROT_PAGE_NORMAL_RO;          /* R, non-exec */
-    return 0;                                /* unmapped */
+        return PROT_PAGE_NORMAL_RO; /* R, non-exec */
+    return 0; /* unmapped */
 }
 
 /*
@@ -206,12 +208,14 @@ static void hvt_hvf_nx_sweep(struct hvt *hvt)
             hv_return_t ret = hv_vm_protect((hv_ipa_t)pos, (size_t)(s - pos),
                                             HV_MEMORY_READ | HV_MEMORY_WRITE);
             if (ret != HV_SUCCESS)
-                errx(1, "hv_vm_protect (W^X sweep) [0x%llx-0x%llx) failed: "
-                        "0x%x",
+                errx(1,
+                     "hv_vm_protect (W^X sweep) [0x%llx-0x%llx) failed: "
+                     "0x%x",
                      (unsigned long long)pos, (unsigned long long)s, ret);
         }
         if (i < hvf_nprot) {
-            uint64_t e = (hvf_prot_ranges[i].end + host_ps - 1) & ~(host_ps - 1);
+            uint64_t e =
+                (hvf_prot_ranges[i].end + host_ps - 1) & ~(host_ps - 1);
             if (e > pos)
                 pos = e;
         }
@@ -241,8 +245,9 @@ static void hvt_hvf_wire_block_ptes(struct hvt *hvt, uint64_t max_end)
         return; /* image entirely below 2MB: the first-block PTEs suffice */
 
     if (nblocks - 1 > HVT_HVF_PTE_MAX_TABLES)
-        errx(1, "hvt_hvf: image end 0x%llx exceeds precise W^X capacity "
-                "(%d blocks); refusing to run with coarse RWX tail",
+        errx(1,
+             "hvt_hvf: image end 0x%llx exceeds precise W^X capacity "
+             "(%d blocks); refusing to run with coarse RWX tail",
              (unsigned long long)max_end, (int)HVT_HVF_PTE_MAX_TABLES);
 
     uint64_t *pmd = (uint64_t *)(hvt->mem + AARCH64_PMD_PGT_BASE);
@@ -294,15 +299,22 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
             if (hpa + host_ps <= s || hpa >= e)
                 continue;
             covered = 1;
-            if (prot & PROT_WRITE) need_write = 1;
-            if (prot & PROT_EXEC) need_exec = 1;
-            if (prot & PROT_READ) need_read = 1;
-            if (prot & PROT_EXEC) need_read = 1;
+            if (prot & PROT_WRITE)
+                need_write = 1;
+            if (prot & PROT_EXEC)
+                need_exec = 1;
+            if (prot & PROT_READ)
+                need_read = 1;
+            if (prot & PROT_EXEC)
+                need_read = 1;
         }
-        if (!covered) continue;
+        if (!covered)
+            continue;
         int host_prot = 0;
-        if (need_read || need_exec || need_write) host_prot |= PROT_READ;
-        if (need_write) host_prot |= PROT_WRITE;
+        if (need_read || need_exec || need_write)
+            host_prot |= PROT_READ;
+        if (need_write)
+            host_prot |= PROT_WRITE;
         if (host_prot == 0)
             /* Keep the page readable for tender-side accesses (e.g. dumpcore
              * pwrite of guest memory); stage-1 patching handles revocation. */
@@ -311,14 +323,20 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
         if (mprotect(hva, host_ps, host_prot) == -1)
             warn("mprotect deferred host page 0x%llx", (unsigned long long)hpa);
         hv_memory_flags_t hv_flags = 0;
-        if (need_read || need_exec) hv_flags |= HV_MEMORY_READ;
-        if (need_write) hv_flags |= HV_MEMORY_WRITE;
-        if (need_exec) hv_flags |= HV_MEMORY_EXEC;
-        if (hv_flags & HV_MEMORY_EXEC) hv_flags |= HV_MEMORY_READ;
+        if (need_read || need_exec)
+            hv_flags |= HV_MEMORY_READ;
+        if (need_write)
+            hv_flags |= HV_MEMORY_WRITE;
+        if (need_exec)
+            hv_flags |= HV_MEMORY_EXEC;
+        if (hv_flags & HV_MEMORY_EXEC)
+            hv_flags |= HV_MEMORY_READ;
         hv_return_t ret = hv_vm_protect((hv_ipa_t)hpa, host_ps, hv_flags);
         if (ret != HV_SUCCESS)
-            errx(1, "hv_vm_protect deferred host page 0x%llx flags 0x%llx failed: 0x%x",
-                  (unsigned long long)hpa, (unsigned long long)hv_flags, ret);
+            errx(1,
+                 "hv_vm_protect deferred host page 0x%llx flags 0x%llx failed: "
+                 "0x%x",
+                 (unsigned long long)hpa, (unsigned long long)hv_flags, ret);
     }
     /* Stage-2: everything not covered by an ELF segment (heap, stack, boot
      * info, page tables) becomes RW, non-executable. */
@@ -331,21 +349,28 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
             uint64_t s = hvf_prot_ranges[i].start;
             uint64_t e = hvf_prot_ranges[i].end;
             uint64_t pte_flags = hvf_prot_to_pte(hvf_prot_ranges[i].prot);
-            uint64_t ps = s < AARCH64_GUEST_BLOCK_SIZE ? s : AARCH64_GUEST_BLOCK_SIZE;
-            uint64_t pe = e < AARCH64_GUEST_BLOCK_SIZE ? e : AARCH64_GUEST_BLOCK_SIZE;
-            if (ps >= pe) continue;
-            for (uint64_t pa = ps & ~(uint64_t)(PAGE_SIZE - 1); pa < pe; pa += PAGE_SIZE) {
-                if (pa < AARCH64_PGT_MAP_START) continue;
+            uint64_t ps =
+                s < AARCH64_GUEST_BLOCK_SIZE ? s : AARCH64_GUEST_BLOCK_SIZE;
+            uint64_t pe =
+                e < AARCH64_GUEST_BLOCK_SIZE ? e : AARCH64_GUEST_BLOCK_SIZE;
+            if (ps >= pe)
+                continue;
+            for (uint64_t pa = ps & ~(uint64_t)(PAGE_SIZE - 1); pa < pe;
+                 pa += PAGE_SIZE) {
+                if (pa < AARCH64_PGT_MAP_START)
+                    continue;
                 size_t idx = pa / PAGE_SIZE;
-                if (pte_flags == 0) pte[idx] = 0;
-                else pte[idx] = pa | pte_flags;
+                if (pte_flags == 0)
+                    pte[idx] = 0;
+                else
+                    pte[idx] = pa | pte_flags;
             }
         }
         /* Uncovered pages below 2MB are heap: RW, non-executable. (Below
          * AARCH64_GUEST_MIN_BASE the initial mapping is already read-only
          * hvt-to-guest input; the sweep covers those in stage 2.) */
-        for (uint64_t pa = AARCH64_GUEST_MIN_BASE; pa < AARCH64_GUEST_BLOCK_SIZE;
-             pa += PAGE_SIZE) {
+        for (uint64_t pa = AARCH64_GUEST_MIN_BASE;
+             pa < AARCH64_GUEST_BLOCK_SIZE; pa += PAGE_SIZE) {
             if (hvf_pa_prot(pa) != -1)
                 continue;
             pte[pa / PAGE_SIZE] = pa | PROT_PAGE_NORMAL;

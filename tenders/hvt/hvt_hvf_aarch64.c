@@ -74,7 +74,7 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
      * stage-1 is 4K via PTE patching below 2MB and via block PTE wiring
      * for the ELF image above 2MB — 4K-precise W^X across the whole
      * image. */
-    extern void hvt_hvf_apply_deferred_protections(struct hvt *hvt);
+    extern void hvt_hvf_apply_deferred_protections(struct hvt * hvt);
     hvt_hvf_apply_deferred_protections(hvt);
 
     /* Create vCPU */
@@ -95,12 +95,12 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
     /* MAIR */
     /* Use the same value as KVM path */
     uint64_t mair = 0;
-    mair |= (0x00ULL << (0*8));
-    mair |= (0x04ULL << (1*8));
-    mair |= (0x0CULL << (2*8));
-    mair |= (0x44ULL << (3*8));
-    mair |= (0xFFULL << (4*8));
-    mair |= (0xBBULL << (5*8));
+    mair |= (0x00ULL << (0 * 8));
+    mair |= (0x04ULL << (1 * 8));
+    mair |= (0x0CULL << (2 * 8));
+    mair |= (0x44ULL << (3 * 8));
+    mair |= (0xFFULL << (4 * 8));
+    mair |= (0xBBULL << (5 * 8));
     ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_MAIR_EL1, mair);
     hv_check(ret, "hv_vcpu_set_sys_reg(MAIR_EL1)");
 
@@ -120,7 +120,8 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
     hv_check(ret, "hv_vcpu_set_sys_reg(TCR_EL1)");
 
     /* TTBR0 */
-    ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_TTBR0_EL1, AARCH64_PGD_PGT_BASE);
+    ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_TTBR0_EL1,
+                              AARCH64_PGD_PGT_BASE);
     hv_check(ret, "hv_vcpu_set_sys_reg(TTBR0_EL1)");
 
     /* SCTLR */
@@ -134,7 +135,8 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
     hv_check(ret, "hv_vcpu_set_reg(CPSR)");
 
     /* Stack pointer EL1 */
-    ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_SP_EL1, hvt->guest_mem_size - 16);
+    ret = hv_vcpu_set_sys_reg(hvb->vcpu, HV_SYS_REG_SP_EL1,
+                              hvt->guest_mem_size - 16);
     hv_check(ret, "hv_vcpu_set_sys_reg(SP_EL1)");
 
     /* Boot info in X0 */
@@ -148,23 +150,23 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
 
     /* Cycle frequency via cntfrq_el0 */
     uint64_t frq;
-    __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(frq) :: "memory");
+    __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(frq)::"memory");
     hvt->cpu_cycle_freq = frq;
 }
 
 /* Syndrome decoding helpers for Data Abort */
-#define ESR_EC_SHIFT 26
-#define ESR_EC_MASK 0x3F
-#define ESR_ISS_ISV (1ULL << 24)
+#define ESR_EC_SHIFT      26
+#define ESR_EC_MASK       0x3F
+#define ESR_ISS_ISV       (1ULL << 24)
 #define ESR_ISS_SAS_SHIFT 22
-#define ESR_ISS_SAS_MASK 3
+#define ESR_ISS_SAS_MASK  3
 #define ESR_ISS_SRT_SHIFT 16
-#define ESR_ISS_SRT_MASK 0x1F
-#define ESR_ISS_WnR (1ULL << 6)
+#define ESR_ISS_SRT_MASK  0x1F
+#define ESR_ISS_WnR       (1ULL << 6)
 #define ESR_EC_DABT_LOWER 0x24
-#define ESR_EC_DABT_CUR 0x25
+#define ESR_EC_DABT_CUR   0x25
 #define ESR_EC_IABT_LOWER 0x20
-#define ESR_EC_IABT_CUR 0x21
+#define ESR_EC_IABT_CUR   0x21
 
 int hvt_vcpu_loop(struct hvt *hvt)
 {
@@ -224,7 +226,9 @@ int hvt_vcpu_loop(struct hvt *hvt)
                 /* Syndrome not valid, need to decode instruction */
                 uint64_t pc;
                 hv_vcpu_get_reg(hvb->vcpu, HV_REG_PC, &pc);
-                errx(1, "Data abort with invalid syndrome: pc=0x%llx far=0x%llx ipa=0x%llx esr=0x%llx",
+                errx(1,
+                     "Data abort with invalid syndrome: pc=0x%llx far=0x%llx "
+                     "ipa=0x%llx esr=0x%llx",
                      (unsigned long long)pc, (unsigned long long)far,
                      (unsigned long long)ipa, (unsigned long long)syndrome);
             }
@@ -245,11 +249,12 @@ int hvt_vcpu_loop(struct hvt *hvt)
             if (sas != 2) {
                 uint64_t pc_dbg;
                 hv_vcpu_get_reg(hvb->vcpu, HV_REG_PC, &pc_dbg);
-                errx(1, "Invalid guest mmio access: ipa=0x%llx len=%d "
-                        "pc=0x%llx esr=0x%llx far=0x%llx",
+                errx(1,
+                     "Invalid guest mmio access: ipa=0x%llx len=%d "
+                     "pc=0x%llx esr=0x%llx far=0x%llx",
                      (unsigned long long)ipa, 1 << sas,
-                     (unsigned long long)pc_dbg,
-                     (unsigned long long)syndrome, (unsigned long long)far);
+                     (unsigned long long)pc_dbg, (unsigned long long)syndrome,
+                     (unsigned long long)far);
             }
             uint64_t reg_val = 0;
             if (srt < 31) {
@@ -273,8 +278,8 @@ int hvt_vcpu_loop(struct hvt *hvt)
                 if (fn == NULL) {
                     uint64_t pc;
                     hv_vcpu_get_reg(hvb->vcpu, HV_REG_PC, &pc);
-                    errx(1, "Invalid guest hypercall %d pc=0x%llx",
-                         nr, (unsigned long long)pc);
+                    errx(1, "Invalid guest hypercall %d pc=0x%llx", nr,
+                         (unsigned long long)pc);
                 }
                 hvt_gpa_t gpa = (hvt_gpa_t)(reg_val & 0xffffffffULL);
                 fn(hvt, gpa);

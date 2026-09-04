@@ -226,7 +226,7 @@ struct hvt_module {
 #if defined(__APPLE__)
 #define DECLARE_MODULE(module_name, ...)                                       \
     static struct hvt_module __module_##module_name                            \
-        __attribute((section("__DATA,__modules"), aligned(8)))                \
+        __attribute((section("__DATA,__modules"), aligned(8)))                 \
         __attribute((used)) = {.name = #module_name, .ops = {__VA_ARGS__}};
 #else
 #define DECLARE_MODULE(module_name, ...)                                       \
