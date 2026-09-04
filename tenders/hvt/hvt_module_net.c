@@ -118,6 +118,15 @@ static void hypercall_net_write(struct hvt *hvt, hvt_gpa_t gpa)
 {
     struct hvt_hc_net_write *wr =
         HVT_CHECKED_GPA_P(hvt, gpa, sizeof(struct hvt_hc_net_write));
+    /*
+     * Pre-check before mft_get_by_index(): its index parameter is
+     * unsigned, so a 64-bit handle like 2^32 + 0 would silently
+     * truncate to a valid device index.
+     */
+    if (wr->handle >= host_mft->entries) {
+        wr->ret = SOLO5_R_EINVAL;
+        return;
+    }
     struct mft_entry *e =
         mft_get_by_index(host_mft, wr->handle, MFT_DEV_NET_BASIC);
     if (e == NULL) {
@@ -144,6 +153,15 @@ static void hypercall_net_read(struct hvt *hvt, hvt_gpa_t gpa)
 {
     struct hvt_hc_net_read *rd =
         HVT_CHECKED_GPA_P(hvt, gpa, sizeof(struct hvt_hc_net_read));
+    /*
+     * Pre-check before mft_get_by_index(): its index parameter is
+     * unsigned, so a 64-bit handle like 2^32 + 0 would silently
+     * truncate to a valid device index.
+     */
+    if (rd->handle >= host_mft->entries) {
+        rd->ret = SOLO5_R_EINVAL;
+        return;
+    }
     struct mft_entry *e =
         mft_get_by_index(host_mft, rd->handle, MFT_DEV_NET_BASIC);
     if (e == NULL) {
