@@ -107,8 +107,8 @@ static void hypercall_block_read(struct hvt *hvt, hvt_gpa_t gpa)
         return;
     }
 
-    ret = pread(e->b.hostfd, HVT_CHECKED_GPA_P(hvt, rd->data, rd->len), rd->len,
-                pos);
+    ret = pread(e->b.hostfd, HVT_CHECKED_GPA_P_DATA(hvt, rd->data, rd->len),
+                rd->len, pos);
     if (ret == -1) {
         fprintf(stderr, "Fatal error when reading: %s\n", strerror(errno));
         exit(1);

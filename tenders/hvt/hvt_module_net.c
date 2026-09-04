@@ -153,7 +153,8 @@ static void hypercall_net_read(struct hvt *hvt, hvt_gpa_t gpa)
 
     ssize_t ret;
 
-    ret = read(e->b.hostfd, HVT_CHECKED_GPA_P(hvt, rd->data, rd->len), rd->len);
+    ret = read(e->b.hostfd, HVT_CHECKED_GPA_P_DATA(hvt, rd->data, rd->len),
+               rd->len);
     if ((ret == 0) || (ret == -1 && errno == EAGAIN)) {
         rd->ret = SOLO5_R_AGAIN;
         return;
@@ -196,7 +197,7 @@ static inline void process_read_entry(struct hvt *hvt, struct hvt_ring *ring,
     } else {
         uint64_t ent_data = ent->data;
         uint32_t ent_len = ent->len;
-        void *data = HVT_CHECKED_GPA_P(hvt, ent_data, ent_len);
+        void *data = HVT_CHECKED_GPA_P_DATA(hvt, ent_data, ent_len);
         ssize_t nr = read(e->b.hostfd, data, ent_len);
 
         if (nr == 0 || (nr == -1 && errno == EAGAIN)) {
