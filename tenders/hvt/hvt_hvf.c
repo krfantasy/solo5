@@ -467,8 +467,11 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
     hvt_hvf_wire_block_ptes(hvt, max_end);
 
     /*
-     * The spill tables are live guest stage-1 state from here on and no
-     * tender code writes them again. Make the host mapping read-only so
+     * The spill tables are live guest stage-1 state from here on; the
+     * production tender never writes them again. (The debug tender's
+     * --gdb module re-mprotects the whole guest mapping RWX after this
+     * and can write them -- operator-trusted tooling by design.)
+     * Make the host mapping read-only so
      * a hypercall path that ever skips the GPA floors (or a hypercall
      * struct parked inside the window, which the struct floor permits)
      * cannot corrupt live page tables via hvt->mem: such a write now

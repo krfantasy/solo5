@@ -83,7 +83,7 @@ inline void *hvt_checked_gpa_min_p(struct hvt *hvt, hvt_gpa_t gpa, size_t sz,
 
 /*
  * Hypercall argument structs and host-read data buffers (console_write,
- * block_write, net_write, gdb breakpoints): reject the tender-owned low
+ * block_write, net_write, KVM gdb breakpoints): reject the tender-owned low
  * memory below HVT_GUEST_FLOOR (zero page, tender-built guest page
  * tables). Covers the xzr -> gpa=0 case at every backend.
  */
