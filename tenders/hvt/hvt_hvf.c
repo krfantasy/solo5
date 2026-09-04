@@ -465,4 +465,24 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
     /* Guest stage-1 above 2MB: 4K tables for the blocks containing the ELF
      * image, refining the coarse 16K stage-2 unions to precise W^X. */
     hvt_hvf_wire_block_ptes(hvt, max_end);
+
+    /*
+     * The spill tables are live guest stage-1 state from here on and no
+     * tender code writes them again. Make the host mapping read-only so
+     * a hypercall path that ever skips the GPA floors (or a hypercall
+     * struct parked inside the window, which the struct floor permits)
+     * cannot corrupt live page tables via hvt->mem: such a write now
+     * fails loudly (SIGSEGV on a direct store, EFAULT -> exit(1) on
+     * pread/read) instead of silently flipping PTE flags. Guest-visible
+     * mappings are unchanged: stage-1 already maps the window read-only.
+     */
+    {
+        uint64_t s = HVT_HVF_PTE_REGION_BASE & ~(host_ps - 1);
+        uint64_t e = (HVT_HVF_PTE_REGION_END + host_ps - 1) & ~(host_ps - 1);
+        if (mprotect(hvt->mem + s, e - s, PROT_READ) == -1)
+            errx(1,
+                 "mprotect PTE spill window [0x%llx, 0x%llx) read-only "
+                 "failed",
+                 (unsigned long long)s, (unsigned long long)e);
+    }
 }
