@@ -826,3 +826,36 @@ xen_expect_abort() {
   [ "$status" -eq 1 ] && \
     [[ "$output" == *"note does not fall within valid size"* ]]
 }
+
+@test "hcfloor ok hvt" {
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt ok
+  expect_success
+}
+
+@test "hcfloor zero hvt" {
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt zero
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid guest access: gpa=0x0,"* ]]
+}
+
+@test "hcfloor pgd hvt" {
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt pgd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid guest access: gpa=0x1000,"* ]]
+}
+
+@test "hcfloor spill hvt" {
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt spill
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid guest access: gpa=0x20000,"* ]]
+}
+
+@test "hcfloor handle hvt" {
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt handle
+  expect_success
+}
