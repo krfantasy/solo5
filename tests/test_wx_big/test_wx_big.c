@@ -18,6 +18,16 @@
 #include "solo5.h"
 #include "../../bindings/lib.c"
 
+#if defined(__aarch64__)
+#define LOOP_INSN 0x14000000u /* b . */
+#elif defined(__x86_64__)
+#define LOOP_INSN 0xFEEBFEEBu /* jmp $; jmp $ */
+#elif defined(__riscv) && (__riscv_xlen == 64)
+#define LOOP_INSN 0x0000006fu /* j . */
+#else
+#error Unsupported architecture
+#endif
+
 static void puts(const char *s)
 {
     solo5_console_write(s, strlen(s));
@@ -40,11 +50,11 @@ static void puthex(uint64_t v)
  * value (by the delta needed to make (text_end & 0x3fff) == 0x1000) if the
  * printed check below differs. */
 #define TEXT_PAD_BYTES (3 * 1024 * 1024 + 18684)
-__attribute__((section(".text"))) const char text_pad[TEXT_PAD_BYTES] = {
-    1, 1, 1, 1
-};
+__attribute__((section(".text")))
+const char text_pad[TEXT_PAD_BYTES] = {1, 1, 1, 1};
 
-static volatile char bss_pad[3 * 1024 * 1024]; /* .bss: part of the data PT_LOAD */
+static volatile char
+    bss_pad[3 * 1024 * 1024]; /* .bss: part of the data PT_LOAD */
 
 /* Initialized-data W^X target: pinned to .data so it lands in the FIRST
  * .data page, inside the same 16K host-page window as the end of .text and
@@ -52,12 +62,12 @@ static volatile char bss_pad[3 * 1024 * 1024]; /* .bss: part of the data PT_LOAD
  * The tender's coarse stage-2 union for that window is RWX, and only
  * precise guest stage-1 tables can enforce W^X there.
  *
- * Initialized with the branch-to-self so that an instruction fetch at this
- * address executes `b .` even if it races the in-guest store below (ARM
- * I-/D-caches are not coherent; a fresh fetch can read the image-loaded
- * value rather than the just-stored one — both are 0x14000000). */
+ * Initialized with an infinite loop so that an instruction fetch at this
+ * address loops even if it races the in-guest store below (ARM I-/D-caches
+ * are not coherent; a fresh fetch can read the image-loaded value rather
+ * than the just-stored one — both are LOOP_INSN). */
 __attribute__((section(".data"))) static volatile uint32_t wx_target =
-    0x14000000u; /* b . */
+    LOOP_INSN;
 
 static void __attribute__((noinline)) exec_at(void *addr)
 {
@@ -79,8 +89,14 @@ int solo5_app_main(const struct solo5_start_info *si)
     puts("text end & 0x3fff:  ");
     puthex(text_end & 0x3fff);
 
-    if ((text_end & 0x3fff) != 0x1000) {
-        puts("FAILURE: straddle precondition lost (text_end & 0x3fff != 0x1000)\n");
+    /* The 16K straddle window only matters for the wnox probe below (which
+     * executes .data in the same host page as the end of .text). The
+     * positive run and the xnow probe must pass on all hosts/arches
+     * regardless of where the linker placed text_end, so only enforce the
+     * tuning there. The wnox case runs Darwin-only where the tuning holds. */
+    if (si->cmdline[0] == 'w' && (text_end & 0x3fff) != 0x1000) {
+        puts("FAILURE: straddle precondition lost (text_end & 0x3fff != "
+             "0x1000)\n");
         return SOLO5_EXIT_FAILURE;
     }
 
@@ -100,10 +116,10 @@ int solo5_app_main(const struct solo5_start_info *si)
     if (si->cmdline[0] == 'w') {
         /* Execute the first .data page, inside the 16K straddle window that
          * also holds the end of .text and rodata (see the printed
-         * addresses). Store a branch-to-self so that a successful fetch
+         * addresses). Store an infinite loop so that a successful fetch
          * loops until the harness timeout instead of randomly trapping. */
         puts("executing data\n");
-        wx_target = 0x14000000u; /* b . */
+        wx_target = LOOP_INSN;
         exec_at((void *)(uintptr_t)&wx_target);
         puts("FAILURE: executed writable memory\n");
         return SOLO5_EXIT_FAILURE;
