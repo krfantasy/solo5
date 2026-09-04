@@ -106,6 +106,31 @@ Experimental:
   applied at 16K (host page) granularity with a union of the segment
   permissions on each host page; the guest stage-1 tables refine this to
   4K. ELF images larger than 450MB are refused at startup: precise W^X capacity is 224 tables (450MB), and the tender aborts rather than running a coarse RWX tail.
+  **Darwin tender sandbox (Seatbelt).** The production `solo5-hvt` calls
+  `hvt_drop_privileges()` before entering the vCPU loop: if started with
+  a real or effective UID of 0 it drops to `nobody` (clearing
+  supplementary groups first), then applies the
+  `kSBXProfilePureComputation` Seatbelt profile and sets
+  `PT_DENY_ATTACH` against same-UID debuggers. The profile prohibits
+  new path-based file writes and new network socket use, while
+  everything the confined run loop needs keeps working: descriptors
+  already open at sandbox time (console output, block image
+  pread/pwrite, AF_UNIX `@fd` socketpair peers), kqueue/kevent, and
+  Hypervisor.framework calls are all unaffected. (Probed on
+  Darwin/arm64: the weaker named profiles each leave one axis open —
+  `kSBXProfileNoWrite` still allows new network sockets, and the
+  network profiles still allow new file writes. The full test suite
+  and a MirageOS/cohttp unikernel serving HTTP over `@fd` run green
+  under `PureComputation`.) `solo5-hvt-debug` is built with
+  `HVT_DROP_PRIVILEGES=0` and stays unsandboxed so lldb attach keeps
+  working. `<sandbox.h>` and the named profiles are SDK-deprecated
+  ("No longer supported", annotated since macOS 10.8) yet still
+  enforced on current macOS. This is defense-in-depth, not a full VM
+  sandbox like Linux seccomp or OpenBSD pledge: a guest-escape bug can
+  still read any file your UID or its groups can read, and run programs
+  as your UID, and the hypervisor entitlement remains intact for the
+  process lifetime. Exec-time DYLD injection is also not blocked: the
+  tender is ad-hoc signed without Hardened Runtime/library validation.
 * _spt_: Linux systems on the x86\_64, ppc64le, aarch64 and riscv64
   architectures, using `solo5-spt` as a _tender_. A Linux distribution with
   libseccomp >= 2.3.3 is required, or >= 2.5.0 on riscv64.

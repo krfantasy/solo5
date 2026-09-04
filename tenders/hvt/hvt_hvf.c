@@ -32,6 +32,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <grp.h>
+#include <pwd.h>
+#include <sandbox.h>
+#include <sys/ptrace.h>
+
 #include <Hypervisor/hv.h>
 #include <Hypervisor/hv_vm.h>
 
@@ -91,7 +96,88 @@ struct hvt *hvt_init(size_t mem_size)
 #if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
 void hvt_drop_privileges(void)
 {
-    /* No priv drop on Darwin yet */
+    /*
+     * Layer 1: drop root. Tender is normally run as the invoking user,
+     * but operators sometimes run as root for /dev/disk* block images.
+     * Refuse to keep UID 0 into the run loop: switch to "nobody"
+     * (UID -2 on macOS). Check both real and effective UIDs so a
+     * hypothetical setuid-root install cannot slip through with
+     * ruid != 0. Non-root invokers skip this. Note: without privilege
+     * supplementary groups cannot be cleared, so group-readable files
+     * stay readable post-escape -- covered by the residual-risk note
+     * in docs/building.md.
+     */
+    if (getuid() == 0 || geteuid() == 0) {
+        struct passwd *pw = getpwnam("nobody");
+        if (pw == NULL)
+            errx(1, "getpwnam(nobody) failed");
+        /* XNU setuid() does not clear supplementary groups; drop them. */
+        if (setgroups(0, NULL) == -1)
+            err(1, "setgroups() failed");
+        if (setgid(pw->pw_gid) == -1)
+            err(1, "setgid(nobody) failed");
+        if (setuid(pw->pw_uid) == -1)
+            err(1, "setuid(nobody) failed");
+    }
+
+    /*
+     * Layer 2: Seatbelt sandbox. Applied after all setup (hv_vm_create,
+     * mmap, hv_vm_map, vcpu_create, module setup, boot_info) so only the
+     * run loop is confined. sandbox_init(2) accepts only named profiles
+     * (custom profile strings return "profile not found"). Of those,
+     * kSBXProfilePureComputation blocks the most for this tender: new
+     * path-based file writes AND new network socket use are both
+     * prohibited, while everything the run loop needs still works --
+     * descriptors already open when the sandbox is applied (console
+     * stdio, pre-opened block image pwrite/pread, AF_UNIX @fd
+     * socketpairs), kqueue/kevent, and Hypervisor.framework calls all
+     * succeed under it (probed on Darwin/arm64; the full test suite
+     * and a MirageOS/cohttp unikernel serving HTTP over @fd run green
+     * with this profile). The weaker named profiles each leave one
+     * axis open: kSBXProfileNoWrite still allows new network sockets;
+     * kSBXProfileNoInternet/NoNetwork still allow new path-based file
+     * writes. No path writes are needed after this point: dumpcore is
+     * only built into the debug tender, which is not sandboxed
+     * (HVT_DROP_PRIVILEGES=0).
+     * NOTE: <sandbox.h> and the kSBXProfile* constants are marked
+     * deprecated by the SDK ("No longer supported" since the 10.8
+     * annotations; header warns it "may be removed in a future
+     * release") yet still enforced on current macOS. If removed,
+     * revisit via App Sandbox bundling or Hardened Runtime /
+     * library-validation hardening (see docs/building.md, Darwin
+     * tender sandbox).
+     */
+    {
+        char *errbuf = NULL;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        if (sandbox_init(kSBXProfilePureComputation, SANDBOX_NAMED, &errbuf) ==
+            -1) {
+            if (errbuf != NULL) {
+                warnx("sandbox_init failed: %s", errbuf);
+                sandbox_free_error(errbuf);
+            } else {
+                warnx("sandbox_init failed: unknown error");
+            }
+            errx(1, "sandbox_init failed");
+        }
+        if (errbuf != NULL)
+            sandbox_free_error(errbuf);
+#pragma clang diagnostic pop
+    }
+
+    /*
+     * Layer 3: anti-debug. PT_DENY_ATTACH prevents same-UID debugger
+     * attach (lldb/dtrace) for the rest of the process lifetime, so a
+     * same-UID attacker cannot attach to dump guest memory or file
+     * descriptors. It does NOT prevent exec-time DYLD_* injection; that
+     * requires Hardened Runtime/library validation in the code-signing
+     * step, which is not enabled (see docs/building.md, Darwin tender
+     * sandbox). Debug binary is built with HVT_DROP_PRIVILEGES=0 so
+     * lldb still works there; this only affects the production tender.
+     */
+    if (ptrace(PT_DENY_ATTACH, 0, 0, 0) == -1)
+        errx(1, "ptrace(PT_DENY_ATTACH) failed");
 }
 #endif
 
