@@ -62,25 +62,46 @@ struct hvt {
 };
 
 /*
- * Check that (gpa) and (gpa + sz) are within guest memory. Returns a host-side
- * pointer to (gpa) if successful, aborts if not.
+ * Check that (gpa) and (gpa + sz) are within guest memory and at or above
+ * (min_gpa). Returns a host-side pointer to (gpa) if successful, aborts if
+ * not.
  */
-#define HVT_CHECKED_GPA_P(hvt, gpa, sz)                                        \
-    hvt_checked_gpa_p((hvt), (gpa), (sz), __FILE__, __LINE__)
-
-inline void *hvt_checked_gpa_p(struct hvt *hvt, hvt_gpa_t gpa, size_t sz,
-                               const char *file, int line)
+inline void *hvt_checked_gpa_min_p(struct hvt *hvt, hvt_gpa_t gpa, size_t sz,
+                                   hvt_gpa_t min_gpa, const char *file,
+                                   int line)
 {
     hvt_gpa_t r;
 
-    if ((gpa >= hvt->guest_mem_size) || add_overflow(gpa, sz, r) ||
-        (r >= hvt->guest_mem_size)) {
+    if ((gpa < min_gpa) || (gpa >= hvt->guest_mem_size) ||
+        add_overflow(gpa, sz, r) || (r >= hvt->guest_mem_size)) {
         errx(1, "%s:%d: Invalid guest access: gpa=0x%" PRIx64 ", sz=%zu", file,
              line, gpa, sz);
     } else {
         return (void *)(hvt->mem + gpa);
     }
 }
+
+/*
+ * Hypercall argument structs and host-read data buffers (console_write,
+ * block_write, net_write, gdb breakpoints): reject the tender-owned low
+ * memory below HVT_GUEST_FLOOR (zero page, tender-built guest page
+ * tables). Covers the xzr -> gpa=0 case at every backend.
+ */
+#define HVT_CHECKED_GPA_P(hvt, gpa, sz)                                        \
+    hvt_checked_gpa_min_p((hvt), (gpa), (sz), HVT_GUEST_FLOOR, __FILE__,       \
+                          __LINE__)
+
+/*
+ * Buffers whose contents the HOST writes into guest memory (block_read,
+ * net_read, ring receive buffers): a malicious guest must not aim these
+ * at tender-owned low memory, so the floor is the image base
+ * (HVT_GUEST_MIN_BASE), above page tables, boot info and the HVF PTE
+ * spill window. Legitimate guests place these buffers on the heap or
+ * stack, both of which are above the loaded image.
+ */
+#define HVT_CHECKED_GPA_P_DATA(hvt, gpa, sz)                                   \
+    hvt_checked_gpa_min_p((hvt), (gpa), (sz), HVT_GUEST_MIN_BASE, __FILE__,    \
+                          __LINE__)
 
 /*
  * Initialise hypervisor, with (guest_mem_size) bytes of guest memory.

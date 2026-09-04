@@ -48,6 +48,29 @@
  */
 #define HVT_GUEST_MIN_BASE 0x100000
 
+/*
+ * Lowest GPA a guest may pass to a hypercall for the hypercall argument
+ * struct itself and for host-read data buffers (enforced by
+ * HVT_CHECKED_GPA_P). Tender-owned guest low memory lives strictly
+ * below it: the zero page and the tender-built guest page tables
+ * (aarch64: PGD/PUD/PMD/PTE at 0x1000-0x7fff; x86_64: GDT/PML4/PDPTE/
+ * PDE/PTE at 0x1000-0x8fff). The tender-filled boot window begins
+ * exactly at the floor (boot_info at 0x10000 + manifest +
+ * HVT_CMDLINE_SIZE cmdline), so legitimate host reads from the boot
+ * window (e.g. console_write of the command line) keep working.
+ *
+ * NOT covered by this floor, because both live above it: the boot
+ * window as a host-write target, and the HVF/aarch64 PTE spill window
+ * [0x20000, HVT_GUEST_MIN_BASE) whose pages are live guest stage-1
+ * tables for images larger than 2MB. Buffers whose contents the host
+ * writes must use HVT_CHECKED_GPA_P_DATA (floored at
+ * HVT_GUEST_MIN_BASE); the HVF tender additionally makes the spill
+ * window read-only in the host mapping after wiring its tables.
+ *
+ * ABI-safe #define addition: no struct change, no version bump.
+ */
+#define HVT_GUEST_FLOOR 0x10000
+
 #ifdef __x86_64__
 /*
  * PIO base address used to dispatch hypercalls.
