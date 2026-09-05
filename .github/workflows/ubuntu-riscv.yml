@@ -1,9 +1,8 @@
 name: Ubuntu-riscv
 on:
   push:
-    branches:
-      - main
   pull_request:
+  workflow_dispatch:
 jobs:
   Build:
     name: RISCV64
