@@ -13,7 +13,9 @@ jobs:
       - name: Install dependencies
         run: |
           brew install llvm
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          # Prepend (GITHUB_PATH only appends, which leaves the runner's
+          # /usr/bin/ld.lld shim shadowing Homebrew's real lld).
+          echo "PATH=/opt/homebrew/opt/llvm/bin:$PATH" >> "$GITHUB_ENV"
       - name: Build
         # Serial make: the tender build system has a known race where the
         # debug and non-debug objects of the same source file share one .Td
