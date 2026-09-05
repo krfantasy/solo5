@@ -20,18 +20,23 @@
 
 #include "solo5.h"
 #include "../../bindings/lib.c"
-#include <hvt_abi.h>
 
 static void puts(const char *s)
 {
     solo5_console_write(s, strlen(s));
 }
 
+#if defined(__x86_64__) || defined(__aarch64__)
+#include <hvt_abi.h>
+
 /*
  * Issue a hypercall with full control of the argument register, as a
  * malicious guest would. The in-tree bindings always pass a stack
  * address; these helpers exist to aim the tender at attacker-chosen
- * guest physical addresses.
+ * guest physical addresses. Only the x86_64 and aarch64 hvt backends
+ * have a hypercall mechanism; on other architectures (or other ABIs)
+ * the probes are never executed, they are only built to prove this
+ * test stays compilable everywhere.
  */
 #if defined(__aarch64__)
 static void raw_hypercall(int nr, uint32_t arg)
@@ -48,7 +53,7 @@ static void raw_hypercall_zero(int nr)
     uint64_t addr = HVT_HYPERCALL_ADDRESS(nr);
     __asm__ __volatile__("str wzr, [%0]" : : "r"(addr) : "memory");
 }
-#elif defined(__x86_64__)
+#else /* x86_64 */
 static void raw_hypercall(int nr, uint32_t arg)
 {
     __asm__ __volatile__("outl %0, %1"
@@ -61,8 +66,6 @@ static void raw_hypercall_zero(int nr)
 {
     raw_hypercall(nr, 0);
 }
-#else
-#error Unsupported architecture
 #endif
 
 static const uint8_t pattern[512] = "hcfloor";
@@ -95,7 +98,10 @@ static int case_ok(void)
     return 0;
 }
 
-/* puts struct parked on the PGD (0x1000): tender must errx. */
+/*
+ * puts struct parked on a tender-owned table page at 0x1000 (the guest
+ * PGD on aarch64, the GDT on x86_64): the tender must errx.
+ */
 static void case_pgd(void)
 {
     puts("hcfloor: aiming puts struct at GPA 0x1000\n");
@@ -104,9 +110,11 @@ static void case_pgd(void)
 }
 
 /*
- * block_read data buffer aimed at the HVF PTE spill window (0x20000):
- * the host-side pread would overwrite guest stage-1 page tables behind
- * the guest's read-only stage-1 mapping. Tender must errx.
+ * block_read data buffer aimed at tender-owned low memory (0x20000: the
+ * HVF PTE spill window, where live guest stage-1 tables live for >2MB
+ * images; on other backends, unused guest RAM). The tender's host-side
+ * write bypasses the guest's read-only stage-1 mapping either way, so
+ * the GPA floor must reject it on every backend. Tender must errx.
  */
 static void case_spill(void)
 {
@@ -190,3 +198,21 @@ int solo5_app_main(const struct solo5_start_info *si)
     puts("ERROR: unknown case (pass one of: ok zero pgd spill handle)\n");
     return SOLO5_EXIT_FAILURE;
 }
+
+#else /* !x86_64 && !aarch64 */
+
+/*
+ * No hypercall mechanism on this architecture (hvt_abi.h itself does
+ * not compile here): this test still builds for other ABIs to prove it
+ * stays compilable everywhere, but the probes only ever run under the
+ * hvt tender.
+ */
+int solo5_app_main(const struct solo5_start_info *si)
+{
+    (void)si;
+    puts("\n**** Solo5 standalone test_hcfloor ****\n\n");
+    puts("hcfloor: hypercall probes are hvt-only (x86_64/aarch64)\n");
+    return SOLO5_EXIT_SUCCESS;
+}
+
+#endif
