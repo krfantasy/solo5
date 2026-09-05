@@ -23,45 +23,10 @@ jobs:
         run: |
           ./configure.sh
           make
-      - name: Smoke test
-        run: |
-          cd tests
-          for t in test_hello test_globals test_quiet test_tls; do
-            echo "== $t =="
-            ../tenders/hvt/solo5-hvt $t/$t.hvt > /dev/null
-          done
-          for t in test_wnox test_xnow; do
-            echo "== $t (expected to trap) =="
-            if ../tenders/hvt/solo5-hvt $t/$t.hvt > $t.out 2>&1; then
-              echo "$t did not trap" >&2
-              exit 1
-            fi
-            grep -q -e "Fatal trap" -e "translation fault" $t.out
-          done
-      - name: Hypercall GPA floor checks (hcfloor)
-        run: |
-          cd tests
-          dd if=/dev/zero of=/tmp/hcfloor.img bs=4k count=1024 status=none
-          T=../tenders/hvt/solo5-hvt
-          run_case() {
-            $T --mem=4096 --block:storage=/tmp/hcfloor.img -- \
-              test_hcfloor/test_hcfloor.hvt "$1" > hcfloor.out 2>&1
-          }
-          echo "== hcfloor ok (legit block roundtrip must pass) =="
-          run_case ok
-          grep -q "SUCCESS" hcfloor.out
-          for c in zero pgd spill; do
-            echo "== hcfloor $c (tender must refuse the hostile GPA) =="
-            if run_case "$c"; then
-              echo "hcfloor $c: tender exited 0" >&2
-              exit 1
-            fi
-            grep -q "Invalid guest access: gpa=0x" hcfloor.out || {
-              echo "hcfloor $c: tender did not emit the GPA floor error" >&2
-              cat hcfloor.out >&2
-              exit 1
-            }
-          done
-          echo "== hcfloor handle (truncating handle must be rejected) =="
-          run_case handle
-          grep -q "SUCCESS" hcfloor.out
+      # Build-only: GitHub-hosted macOS runners are themselves virtual
+      # machines without nested virtualization — hv_vm_create fails with
+      # HV_NOT_SUPPORTED (0xfae9400f), so no guest can boot in CI. The
+      # tender, toolchain and all test images (incl. test_hcfloor) are
+      # still compile-verified here; running them requires real Apple
+      # Silicon (the make-built tender boots them directly, see
+      # docs/building.md).
