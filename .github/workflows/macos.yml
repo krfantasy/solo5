@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         run: |
-          brew install llvm
+          brew install llvm lld
           # Prepend (GITHUB_PATH only appends, which leaves the runner's
           # /usr/bin/ld.lld shim shadowing Homebrew's real lld).
           echo "PATH=/opt/homebrew/opt/llvm/bin:$PATH" >> "$GITHUB_ENV"
