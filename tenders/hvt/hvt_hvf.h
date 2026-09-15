@@ -39,4 +39,20 @@ struct hvt_b {
     pthread_t io_thread_net;
 };
 
+/*
+ * Tender-owned guest low-memory regions (full layout in
+ * hvt_cpu_aarch64.h; the producer is hvt_hvf.c):
+ *   [0, AARCH64_BOOT_INFO)          zero page + boot-time stage-1 tables
+ *   [AARCH64_BOOT_INFO, HVT_HVF_PTE_REGION_BASE)
+ *                                    boot window (boot_info/mft/cmdline)
+ *   [HVT_HVF_PTE_REGION_BASE, HVT_HVF_PTE_REGION_END)
+ *                                    PTE spill tables for >2MB images
+ * The production tender makes all three host-read-only before the
+ * vcpu loop runs (see hvt_hvf_apply_deferred_protections() and
+ * hvt_drop_privileges()); the debug build compiles out only the
+ * boot-window freeze -- the table and spill freezes are unconditional.
+ */
+#define HVT_HVF_PTE_REGION_BASE 0x20000UL
+#define HVT_HVF_PTE_REGION_END AARCH64_GUEST_MIN_BASE /* 0x100000 */
+
 #endif /* HVT_HVF_H */

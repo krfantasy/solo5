@@ -166,6 +166,30 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep)
 #define ESR_EC_IABT_LOWER 0x20
 #define ESR_EC_IABT_CUR   0x21
 
+/*
+ * HVF-only dispatch gate for hypercall argument structs. The shared
+ * handlers enforce only the upper bound, so the tender itself rejects
+ * struct GPAs in tender-owned low memory before any handler runs:
+ * below AARCH64_BOOT_INFO (zero page + boot-time stage-1 tables; an
+ * xzr hypercall argument lands here as gpa=0) and inside the PTE
+ * spill window. The boot window [0x10000, 0x20000) stays allowed:
+ * its contents (boot_info/mft/cmdline) are tender-read-only inputs,
+ * but the host does write result fields into structs parked there
+ * (walltime/poll/blk/net) -- such writes SIGSEGV on the production
+ * freeze rather than reaching this gate. Data buffers the handlers
+ * covered physically by the low-memory freezes, not here: the gate
+ * only sees the struct pointer, never inner pointers.
+ */
+static inline void hvt_hvf_check_hypercall_gpa(int nr, hvt_gpa_t gpa)
+{
+    if (gpa < AARCH64_BOOT_INFO ||
+        (gpa >= HVT_HVF_PTE_REGION_BASE && gpa < HVT_HVF_PTE_REGION_END))
+        errx(1,
+             "Invalid guest hypercall %d: gpa=0x%llx in tender-owned "
+             "low memory",
+             nr, (unsigned long long)gpa);
+}
+
 int hvt_vcpu_loop(struct hvt *hvt)
 {
     struct hvt_b *hvb = hvt->b;
@@ -271,6 +295,7 @@ int hvt_vcpu_loop(struct hvt *hvt)
                 int nr = (int)((ipa - HVT_HYPERCALL_MMIO_BASE) >> 3);
                 if (nr == HVT_HYPERCALL_HALT) {
                     hvt_gpa_t gpa = (hvt_gpa_t)(reg_val & 0xffffffffULL);
+                    hvt_hvf_check_hypercall_gpa(nr, gpa);
                     return hvt_core_hypercall_halt(hvt, gpa);
                 }
                 hvt_hypercall_fn_t fn = hvt_core_hypercalls[nr];
@@ -281,6 +306,7 @@ int hvt_vcpu_loop(struct hvt *hvt)
                          (unsigned long long)pc);
                 }
                 hvt_gpa_t gpa = (hvt_gpa_t)(reg_val & 0xffffffffULL);
+                hvt_hvf_check_hypercall_gpa(nr, gpa);
                 fn(hvt, gpa);
                 /* Advance PC */
                 uint64_t pc;

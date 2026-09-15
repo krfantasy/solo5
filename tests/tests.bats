@@ -826,3 +826,50 @@ xen_expect_abort() {
   [ "$status" -eq 1 ] && \
     [[ "$output" == *"note does not fall within valid size"* ]]
 }
+
+@test "hcfloor ok hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt ok
+  expect_success
+}
+
+@test "hcfloor spill hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt spill
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Fatal error when reading"* ]]
+}
+
+@test "hcfloor pte hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt pte
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Fatal error when reading"* ]]
+}
+
+@test "hcfloor bootwin hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt bootwin
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Fatal error when reading"* ]]
+}
+
+@test "hcfloor zero hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt zero
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid guest hypercall 2: gpa=0x0"* ]]
+}
+
+@test "hcfloor pgd hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  hvt_run --block:storage=${BLOCK} -- test_hcfloor/test_hcfloor.hvt pgd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid guest hypercall 2: gpa=0x1000"* ]]
+}

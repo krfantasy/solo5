@@ -44,6 +44,13 @@
 #include "hvt_hvf.h"
 #include "hvt_cpu_aarch64.h"
 
+#if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
+/* Set by hvt_init(); hvt_drop_privileges() gets no argument from the
+ * shared API, so the final boot-window freeze reaches guest memory
+ * through this file-local pointer. Production builds only. */
+static struct hvt *the_hvt;
+#endif
+
 struct hvt *hvt_init(size_t mem_size)
 {
     hv_return_t ret;
@@ -90,12 +97,38 @@ struct hvt *hvt_init(size_t mem_size)
     hvb->net_ring_gpa = 0;
 
     hvt->b = hvb;
+#if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
+    the_hvt = hvt;
+#endif
     return hvt;
 }
 
 #if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
 void hvt_drop_privileges(void)
 {
+    /*
+     * Layer 0: freeze the boot window. hvt_boot_info_init() -- the last
+     * tender write into guest low memory -- has completed by now
+     * (hvt_main.c: boot_info_init then drop_privileges), so with this
+     * mprotect all of [0, 0x100000) is host-read-only for the rest of
+     * the run: the zero page, tables and spill window were frozen in
+     * hvt_hvf_apply_deferred_protections(). Runs before the sandbox and
+     * root drop so no Seatbelt profile or UID change can interfere.
+     * Compiled out of the debug tender (HVT_DROP_PRIVILEGES=0), which
+     * drops this whole function so lldb can attach (see Layer 3); its
+     * only extra module, dumpcore, reads but never writes guest memory.
+     */
+    {
+        size_t host_ps = (size_t)getpagesize();
+        uint64_t s = AARCH64_BOOT_INFO & ~(uint64_t)(host_ps - 1);
+        uint64_t e =
+            (HVT_HVF_PTE_REGION_BASE + host_ps - 1) & ~(uint64_t)(host_ps - 1);
+        if (mprotect(the_hvt->mem + s, e - s, PROT_READ) == -1)
+            errx(1,
+                 "mprotect boot window [0x%llx, 0x%llx) read-only failed",
+                 (unsigned long long)s, (unsigned long long)e);
+    }
+
     /*
      * Layer 1: drop root. Tender is normally run as the invoking user,
      * but operators sometimes run as root for /dev/disk* block images.
@@ -317,8 +350,6 @@ static void hvt_hvf_nx_sweep(struct hvt *hvt)
  * changes. Blocks beyond the image (heap) keep their 2MB sections; stage 2
  * already makes them RW/NX.
  */
-#define HVT_HVF_PTE_REGION_BASE 0x20000UL
-#define HVT_HVF_PTE_REGION_END  AARCH64_GUEST_MIN_BASE /* 0x100000 */
 #define HVT_HVF_PTE_MAX_TABLES                                                 \
     ((HVT_HVF_PTE_REGION_END - HVT_HVF_PTE_REGION_BASE) / PAGE_SIZE) /* 224 */
 
@@ -465,4 +496,54 @@ void hvt_hvf_apply_deferred_protections(struct hvt *hvt)
     /* Guest stage-1 above 2MB: 4K tables for the blocks containing the ELF
      * image, refining the coarse 16K stage-2 unions to precise W^X. */
     hvt_hvf_wire_block_ptes(hvt, max_end);
+
+    /*
+     * Freeze the zero page and the boot-time stage-1 tables
+     * [0, AARCH64_BOOT_INFO): they were just written for the last time
+     * (aarch64_setup_memory_mapping(), the PTE patching and
+     * hvt_hvf_wire_block_ptes() above). This is the primary D2 barrier
+     * on HVF: the shared hypercall handlers only enforce the upper
+     * bound, so a malicious guest can still NAME any low GPA, but every
+     * host-side write into this region now fails physically (EFAULT ->
+     * exit(1) on pread/read; SIGSEGV on direct stores) instead of
+     * overwriting the live first-2MB PTE table behind the guest's
+     * unmapped stage-1 view. The boot window [0x10000, 0x20000) is
+     * written later by hvt_boot_info_init() and is frozen in
+     * hvt_drop_privileges() instead. This freeze is unconditional
+     * (outside any HVT_DROP_PRIVILEGES guard): the Darwin debug tender
+     * links only dumpcore -- the gdb module has no HVF backend (see
+     * tenders/GNUmakefile) -- and dumpcore only reads guest memory,
+     * so no tender needs write access here; only the boot window's
+     * freeze (Layer 0 of hvt_drop_privileges()) is compiled out of
+     * the debug build.
+     * Guest-visible mappings are unchanged: stage-1 leaves
+     * [0, AARCH64_BOOT_INFO) unmapped.
+     */
+    {
+        uint64_t s = 0;
+        uint64_t e = AARCH64_BOOT_INFO & ~(host_ps - 1);
+        if (mprotect(hvt->mem + s, e - s, PROT_READ) == -1)
+            errx(1,
+                 "mprotect boot page tables [0x%llx, 0x%llx) read-only "
+                 "failed",
+                 (unsigned long long)s, (unsigned long long)e);
+    }
+
+    /*
+     * The spill tables [HVT_HVF_PTE_REGION_BASE,
+     * HVT_HVF_PTE_REGION_END) are live guest stage-1 state for images
+     * above 2MB; no tender writes them again, so they are frozen
+     * together with the rest of low memory -- unconditionally: the
+     * Darwin debug tender links only dumpcore, which reads but never
+     * writes guest memory (see above).
+     */
+    {
+        uint64_t s = HVT_HVF_PTE_REGION_BASE & ~(host_ps - 1);
+        uint64_t e = (HVT_HVF_PTE_REGION_END + host_ps - 1) & ~(host_ps - 1);
+        if (mprotect(hvt->mem + s, e - s, PROT_READ) == -1)
+            errx(1,
+                 "mprotect PTE spill window [0x%llx, 0x%llx) read-only "
+                 "failed",
+                 (unsigned long long)s, (unsigned long long)e);
+    }
 }
