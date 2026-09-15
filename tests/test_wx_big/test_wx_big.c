@@ -49,7 +49,7 @@ static void puthex(uint64_t v)
 /* Tuned so text ends at offset 0x1000 within a 16K window. Adjust this
  * value (by the delta needed to make (text_end & 0x3fff) == 0x1000) if the
  * printed check below differs. */
-#define TEXT_PAD_BYTES (3 * 1024 * 1024 + 18684)
+#define TEXT_PAD_BYTES (3 * 1024 * 1024 + 18676)
 __attribute__((section(".text")))
 const char text_pad[TEXT_PAD_BYTES] = {1, 1, 1, 1};
 
