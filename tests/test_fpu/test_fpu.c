@@ -47,7 +47,7 @@ int solo5_app_main(const struct solo5_start_info *si __attribute__((unused)))
 #elif defined(__aarch64__)
 #if defined(__clang__)
     __asm__("ld1.4s {v0}, %0\n"
-            "ld1.4s {v0}, %0\n"
+            "ld1.4s {v1}, %0\n"
             "fmul v0.4s, v1.4s, v0.4s\n"
             "st1.4s {v0}, %0\n"
             : "=m"(c)
