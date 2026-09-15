@@ -822,7 +822,14 @@ xen_expect_abort() {
 }
 
 @test "buggyelf hvt" {
-  hvt_run test_buggyelf/buggyelf.hvt
+  # The fuzzed fixture is an x86_64 ELF; on aarch64 hosts ehdr_is_valid()
+  # rejects its header before the note-size check this test exercises, so
+  # use a byte-identical variant with e_machine flipped to EM_AARCH64.
+  B=test_buggyelf/buggyelf.hvt
+  case "$(uname -m)" in
+    arm64|aarch64) B=test_buggyelf/buggyelf_aarch64.hvt ;;
+  esac
+  hvt_run $B
   [ "$status" -eq 1 ] && \
     [[ "$output" == *"note does not fall within valid size"* ]]
 }
