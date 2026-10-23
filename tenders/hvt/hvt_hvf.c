@@ -36,6 +36,7 @@
 #include <pwd.h>
 #include <sandbox.h>
 #include <sys/ptrace.h>
+#include <sys/wait.h>
 
 #include <Hypervisor/hv.h>
 #include <Hypervisor/hv_vm.h>
@@ -43,6 +44,15 @@
 #include "hvt.h"
 #include "hvt_hvf.h"
 #include "hvt_cpu_aarch64.h"
+
+/*
+ * Named Seatbelt profile applied by hvt_drop_privileges() Layer 2. The
+ * same string the SDK's kSBXProfilePureComputation constant resolves
+ * to; spelled out here because newer SDKs removed the kSBXProfile*
+ * constants from <sandbox.h> (the profile itself still works on macOS
+ * versions where sandbox_init(2) is functional at all).
+ */
+#define HVT_HVF_SEATBELT_PROFILE "pure-computation"
 
 #if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
 /* Set by hvt_init(); hvt_drop_privileges() gets no argument from the
@@ -124,8 +134,7 @@ void hvt_drop_privileges(void)
         uint64_t e =
             (HVT_HVF_PTE_REGION_BASE + host_ps - 1) & ~(uint64_t)(host_ps - 1);
         if (mprotect(the_hvt->mem + s, e - s, PROT_READ) == -1)
-            errx(1,
-                 "mprotect boot window [0x%llx, 0x%llx) read-only failed",
+            errx(1, "mprotect boot window [0x%llx, 0x%llx) read-only failed",
                  (unsigned long long)s, (unsigned long long)e);
     }
 
@@ -158,44 +167,104 @@ void hvt_drop_privileges(void)
      * mmap, hv_vm_map, vcpu_create, module setup, boot_info) so only the
      * run loop is confined. sandbox_init(2) accepts only named profiles
      * (custom profile strings return "profile not found"). Of those,
-     * kSBXProfilePureComputation blocks the most for this tender: new
-     * path-based file writes AND new network socket use are both
-     * prohibited, while everything the run loop needs still works --
-     * descriptors already open when the sandbox is applied (console
-     * stdio, pre-opened block image pwrite/pread, AF_UNIX @fd
+     * HVT_HVF_SEATBELT_PROFILE ("pure-computation") blocks the most for
+     * this tender: new path-based file writes AND new network socket use
+     * are both prohibited, while everything the run loop needs still
+     * works -- descriptors already open when the sandbox is applied
+     * (console stdio, pre-opened block image pwrite/pread, AF_UNIX @fd
      * socketpairs), kqueue/kevent, and Hypervisor.framework calls all
-     * succeed under it (probed on Darwin/arm64; the full test suite
-     * and a MirageOS/cohttp unikernel serving HTTP over @fd run green
-     * with this profile). The weaker named profiles each leave one
-     * axis open: kSBXProfileNoWrite still allows new network sockets;
-     * kSBXProfileNoInternet/NoNetwork still allow new path-based file
+     * succeed under it (probed on Darwin/arm64; the full test suite and
+     * a MirageOS/cohttp unikernel serving HTTP over @fd run green with
+     * this profile). The weaker named profiles each leave one axis
+     * open: "no-write" still allows new network sockets;
+     * "no-internet"/"no-network" still allow new path-based file
      * writes. No path writes are needed after this point: dumpcore is
      * only built into the debug tender, which is not sandboxed
      * (HVT_DROP_PRIVILEGES=0).
-     * NOTE: <sandbox.h> and the kSBXProfile* constants are marked
-     * deprecated by the SDK ("No longer supported" since the 10.8
-     * annotations; header warns it "may be removed in a future
-     * release") yet still enforced on current macOS. If removed,
-     * revisit via App Sandbox bundling or Hardened Runtime /
-     * library-validation hardening (see docs/building.md, Darwin
-     * tender sandbox).
+     *
+     * <sandbox.h> and the named profiles are SDK-deprecated ("No longer
+     * supported" since the 10.8 annotations), and on macOS 27 they
+     * became fatal at runtime: the kernel SIGKILLs any process that
+     * applies a real named profile, while nonexistent profiles still
+     * return a clean -1 (probe-verified on 27.0.1). Applying the
+     * profile blindly would kill the tender at startup on macOS 27+,
+     * so probe first: fork() a child that makes the exact
+     * sandbox_init() call the tender would make. The child never
+     * touches Hypervisor.framework state and _exit()s to skip
+     * inherited atexit handlers.
+     *
+     *   - child succeeds: the parent applies the sandbox, keeping the
+     *     original fail-closed behavior on a genuine sandbox_init()
+     *     error;
+     *   - child killed by a signal: the profile is fatal on this
+     *     system (macOS 27 behavior); warn loudly and continue
+     *     WITHOUT the sandbox -- only this layer is lost (new file
+     *     writes and new network sockets unrestricted); the
+     *     boot-window freeze, root drop and anti-debug layers still
+     *     apply;
+     *   - child exits nonzero (sandbox subsystem refused the profile):
+     *     stays fail-closed, as before;
+     *   - fork() itself fails: warn and continue unsandboxed.
+     *
+     * If the Seatbelt mechanism disappears entirely, revisit via App
+     * Sandbox bundling or Hardened Runtime / library-validation
+     * hardening (see docs/building.md, Darwin tender sandbox).
      */
     {
-        char *errbuf = NULL;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        if (sandbox_init(kSBXProfilePureComputation, SANDBOX_NAMED, &errbuf) ==
-            -1) {
-            if (errbuf != NULL) {
-                warnx("sandbox_init failed: %s", errbuf);
-                sandbox_free_error(errbuf);
-            } else {
-                warnx("sandbox_init failed: unknown error");
+        pid_t probe = fork();
+        if (probe == -1) {
+            warnx("WARNING: fork() for the Seatbelt probe failed:"
+                  " continuing WITHOUT sandbox; new file writes and"
+                  " network sockets are NOT restricted");
+        } else if (probe == 0) {
+            char *eb = NULL;
+            int r = sandbox_init(HVT_HVF_SEATBELT_PROFILE, SANDBOX_NAMED, &eb);
+            if (r == -1) {
+                if (eb != NULL) {
+                    warnx("sandbox_init failed: %s", eb);
+                    sandbox_free_error(eb);
+                } else {
+                    warnx("sandbox_init failed: unknown error");
+                }
+                _exit(1);
             }
-            errx(1, "sandbox_init failed");
+            if (eb != NULL)
+                sandbox_free_error(eb);
+            _exit(0);
+        } else {
+            int st;
+            if (waitpid(probe, &st, 0) == -1)
+                err(1, "waitpid() for Seatbelt probe failed");
+            if (WIFSIGNALED(st)) {
+                warnx("WARNING: Seatbelt profile '%s' is fatal on this"
+                      " system (probe child killed by signal %d):"
+                      " continuing WITHOUT sandbox; new file writes and"
+                      " network sockets are NOT restricted",
+                      HVT_HVF_SEATBELT_PROFILE, WTERMSIG(st));
+            } else if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+                errx(1,
+                     "sandbox_init(%s) refused by the sandbox subsystem;"
+                     " see probe diagnostics above",
+                     HVT_HVF_SEATBELT_PROFILE);
+            } else {
+                char *eb = NULL;
+                int r =
+                    sandbox_init(HVT_HVF_SEATBELT_PROFILE, SANDBOX_NAMED, &eb);
+                if (r == -1) {
+                    if (eb != NULL) {
+                        warnx("sandbox_init failed: %s", eb);
+                        sandbox_free_error(eb);
+                    } else {
+                        warnx("sandbox_init failed: unknown error");
+                    }
+                    errx(1, "sandbox_init failed");
+                }
+                if (eb != NULL)
+                    sandbox_free_error(eb);
+            }
         }
-        if (errbuf != NULL)
-            sandbox_free_error(errbuf);
 #pragma clang diagnostic pop
     }
 
