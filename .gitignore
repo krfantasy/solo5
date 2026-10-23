@@ -28,8 +28,6 @@ solo5-*.tar.gz
 .pi-lens.json
 pi-lens.json
 include/version.h.distrib
-bindings/noexecstack.c
-bindings/noexecstack.h
-bindings/noexecstack.s
+/bindings/noexecstack.*
 bindings/solo5_*_darwin.lds
 tenders/hvt/hvt_module_gdb.Td

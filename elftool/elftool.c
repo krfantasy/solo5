@@ -114,6 +114,23 @@ static void usage(const char *prog)
     exit(EXIT_FAILURE);
 }
 
+static void valid_dev_name(const char *data, const char *source, size_t line)
+{
+    if (strlen(data) > MFT_NAME_MAX)
+        errx(1, "%s:%zu name too long: %s", source, line, data);
+    for (const char *p = data; *p; p++)
+        if (!isalnum((unsigned char)*p))
+            errx(1, "%s:%zu name %s is not alphanumeric", source, line, data);
+}
+
+static void valid_dev_type(const char *data, const char *source, size_t line)
+{
+    /* The json parsing ensures data is NUL-terminated. */
+    if (!(strcmp(data, "NET_BASIC") || strcmp(data, "BLOCK_BASIC")))
+        errx(1, "%s:%zu type %s is neither NET_BASIC nor BLOCK_BASIC", source,
+             line, data);
+}
+
 static int elftool_gen_mft(const char *source, const char *output)
 {
     FILE *sfp = strncmp(source, "-", 2) ? fopen(source, "r") : stdin;
@@ -198,15 +215,10 @@ static int elftool_gen_mft(const char *source, const char *output)
         if (jdevname->u.s[0] == 0)
             errx(1, "%s:%zu: .devices[...]: .name may not be empty", source,
                  jdevname->line);
-        if (strlen(jdevname->u.s) > MFT_NAME_MAX)
-            errx(1, "%s:%zu: .devices[...]: name too long", source,
-                 jdevname->line);
-        for (char *p = jdevname->u.s; *p; p++)
-            if (!isalnum((unsigned char)*p))
-                errx(1, "%s:%zu: .devices[...]: name is not alphanumeric",
-                     source, jdevname->line);
+        valid_dev_name(jdevname->u.s, source, jdevname->line);
         if (jdevtype == NULL)
             errx(1, "%s:%zu: .devices[...]: missing .type", source, (*i)->line);
+        valid_dev_type(jdevtype->u.s, source, jdevtype->line);
         fprintf(ofp, out_entry, jdevname->u.s, jdevtype->u.s);
     }
     fprintf(ofp, out_footer);
@@ -227,7 +239,8 @@ static int elftool_query_mft(const char *binary)
     struct mft *mft;
     size_t mft_size;
     if (elf_load_note(bin_fd, binary, MFT1_NOTE_TYPE, MFT1_NOTE_ALIGN,
-                      MFT1_NOTE_MAX_SIZE, (void **)&mft, &mft_size) == -1) {
+                      sizeof(struct mft), MFT1_NOTE_MAX_SIZE, (void **)&mft,
+                      &mft_size) == -1) {
         warnx("%s: No Solo5 manifest found in executable", binary);
         close(bin_fd);
         return EXIT_FAILURE;
@@ -249,6 +262,7 @@ static int elftool_query_mft(const char *binary)
         if (mft->e[i].type >= MFT_RESERVED_FIRST)
             continue;
 
+        valid_dev_name(mft->e[i].name, binary, 0);
         printf("    { \"name\": \"%s\", \"type\": \"%s\" }%s\n", mft->e[i].name,
                mft_type_to_string(mft->e[i].type),
                (i == (mft->entries - 1) ? "" : ","));
@@ -292,7 +306,8 @@ static int elftool_query_abi(const char *binary)
     struct abi1_info *abi1;
     size_t abi1_size;
     if (elf_load_note(bin_fd, binary, ABI1_NOTE_TYPE, ABI1_NOTE_ALIGN,
-                      ABI1_NOTE_MAX_SIZE, (void **)&abi1, &abi1_size) == -1) {
+                      sizeof(struct abi1_info), ABI1_NOTE_MAX_SIZE,
+                      (void **)&abi1, &abi1_size) == -1) {
         warnx("%s: No Solo5 ABI information found in executable", binary);
         close(bin_fd);
         return EXIT_FAILURE;

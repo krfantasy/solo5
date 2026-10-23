@@ -96,7 +96,7 @@ static void handle_mem(char *cmdarg, size_t *mem_size)
 static void usage(const char *prog)
 {
     fprintf(stderr,
-            "usage: %s [ CORE OPTIONS ] [ -- ] "
+            "usage: %s [ CORE OPTIONS ] [ MODULE OPTIONS ] [ -- ] "
             "KERNEL [ ARGS ]\n",
             prog);
     fprintf(stderr, "KERNEL is the filename of the unikernel to run.\n");
@@ -104,6 +104,7 @@ static void usage(const char *prog)
     fprintf(stderr, "Core options:\n");
     fprintf(stderr, "  [ --mem=512 ] (guest memory in MB)\n");
     fprintf(stderr, "    --help (display this help)\n");
+    fprintf(stderr, "    --version (display version information)\n");
     fprintf(stderr, "Compiled-in modules: ");
     for (struct spt_module *m = &__start_modules; m < &__stop_modules; m++) {
         fprintf(stderr, "%s ", m->name);
@@ -136,7 +137,6 @@ int main(int argc, char **argv)
     const char *prog;
     const char *elf_filename;
     int elf_fd = -1;
-    int matched;
 
     prog = basename(*argv);
     argc--;
@@ -181,7 +181,8 @@ int main(int argc, char **argv)
     struct abi1_info *abi1;
     size_t abi1_size;
     if (elf_load_note(elf_fd, elf_filename, ABI1_NOTE_TYPE, ABI1_NOTE_ALIGN,
-                      ABI1_NOTE_MAX_SIZE, (void **)&abi1, &abi1_size) == -1)
+                      sizeof(struct abi1_info), ABI1_NOTE_MAX_SIZE,
+                      (void **)&abi1, &abi1_size) == -1)
         errx(1, "%s: No Solo5 ABI information found in executable",
              elf_filename);
     if (abi1->abi_target != SPT_ABI_TARGET)
@@ -194,7 +195,8 @@ int main(int argc, char **argv)
     struct mft *mft;
     size_t mft_size;
     if (elf_load_note(elf_fd, elf_filename, MFT1_NOTE_TYPE, MFT1_NOTE_ALIGN,
-                      MFT1_NOTE_MAX_SIZE, (void **)&mft, &mft_size) == -1)
+                      sizeof(struct mft), MFT1_NOTE_MAX_SIZE, (void **)&mft,
+                      &mft_size) == -1)
         errx(1, "%s: No Solo5 manifest found in executable", elf_filename);
     if (mft_validate(mft, mft_size) == -1) {
         free(mft);
@@ -213,23 +215,20 @@ int main(int argc, char **argv)
             break;
         }
 
-        matched = 0;
         if (strncmp("--mem=", *argv, 6) == 0) {
             handle_mem(*argv, &mem_size);
-            matched = 1;
             argc--;
             argv++;
+            continue;
         }
         if (handle_cmdarg(*argv, mft) == 0) {
             /* Handled by module, consume and go on to next arg */
-            matched = 1;
             argc--;
             argv++;
+            continue;
         }
-        if (!matched) {
-            warnx("Invalid option: `%s'", *argv);
-            usage(prog);
-        }
+        warnx("Invalid option: `%s'", *argv);
+        usage(prog);
     }
     assert(elf_filename == *argv);
     argc--;
